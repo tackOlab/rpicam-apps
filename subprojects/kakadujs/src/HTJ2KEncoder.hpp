@@ -3,6 +3,7 @@
 
 #pragma once
 
+#define MULTI_THREAD
 // Kakadu core includes
 #include "kdu_elementary.h"
 #include "kdu_messaging.h"
@@ -277,10 +278,6 @@ class HTJ2KEncoder {
     // Now compress the image in one hit, using `kdu_stripe_compressor'
     
   #ifdef MULTI_THREAD
-    kdu_supp::kdu_thread_env env;
-    env.create();
-    env.add_thread();
-    env.add_thread();
     compressor.start(codestream, 0, nullptr, nullptr, 0U, false, false, true, 0.0, 0, true, &env);
   #else
     compressor.start(codestream);
