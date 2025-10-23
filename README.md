@@ -17,3 +17,11 @@ Status
 ------
 
 [![ToT libcamera build/run test](https://github.com/raspberrypi/rpicam-apps/actions/workflows/rpicam-test.yml/badge.svg)](https://github.com/raspberrypi/rpicam-apps/actions/workflows/rpicam-test.yml)
+
+Meson
+-----
+
+```
+ meson setup --wipe build --buildtype release -Denable_libav=disabled -Denable_drm=enabled -Denable_egl=enabled -Denable_qt=disabled -Denable_opencv=enabled -Denable_tflite=disabled -Denable_hailo=enabled
+ meson compile -C build
+ ```
