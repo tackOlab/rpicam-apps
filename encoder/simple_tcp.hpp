@@ -9,13 +9,13 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 class simple_tcp {
   int sockfd;
   int client_sockfd;
   sockaddr_in addr;
   sockaddr_in from_addr;
-  uint8_t buf[5000000];
 
  public:
   simple_tcp(std::string address, int port) : sockfd(-1), client_sockfd(-1) {
@@ -61,16 +61,16 @@ class simple_tcp {
   }
 
   int Rx(uint8_t *dst) {
+    std::vector<uint8_t> buf(5000000);
     int len = 0;
-    memset(buf, 0, sizeof(buf));
-    int rsize = recv(client_sockfd, buf, sizeof(buf), 0);
+    int rsize = recv(client_sockfd, buf.data(), buf.size(), 0);
     len += rsize;
     while (rsize > 0) {
       for (int i = 0; i < rsize; ++i) {
         dst[i] = buf[i];
       }
       dst += rsize;
-      rsize = recv(client_sockfd, buf, sizeof(buf), 0);
+      rsize = recv(client_sockfd, buf.data(), buf.size(), 0);
       len += rsize;
     }
     return len;
