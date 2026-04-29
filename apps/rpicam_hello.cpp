@@ -6,6 +6,7 @@
  */
 
 #include <chrono>
+#include <limits>
 
 #include "core/options.hpp"
 #include "core/rpicam_app.hpp"
@@ -46,6 +47,10 @@ static void event_loop(RPiCamApp &app)
 
 	app.StartCamera();
 
+	const int64_t archive_interval_us =
+		static_cast<int64_t>(options->Get().archive_min_interval_ms) * 1000;
+	int64_t last_archive_us = std::numeric_limits<int64_t>::min();
+
 	auto start_time = std::chrono::high_resolution_clock::now();
 	for (unsigned int count = 0;; count++)
 	{
@@ -72,17 +77,23 @@ static void event_loop(RPiCamApp &app)
 
 		std::vector<Detection> objects;
 		completed_request->post_process_metadata.Get("object_detect.results", objects);
-		bool encode = false;
+		bool person_detected = false;
 		for (auto const &v : objects)
 		{
 			if (v.name == "person" && v.confidence > 0.75)
 			{
-				encode = true;
+				person_detected = true;
 				break;
 			}
 		}
-		if (!encode)
-			continue;
+
+		const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+									now.time_since_epoch())
+									.count();
+		const bool archive_this_frame =
+			person_detected && (now_us - last_archive_us >= archive_interval_us);
+		if (archive_this_frame)
+			last_archive_us = now_us;
 
 		libcamera::Stream *stream = app.ViewfinderStream();
 		BufferReadSync r(&app, completed_request->buffers[stream]);
@@ -90,7 +101,8 @@ static void event_loop(RPiCamApp &app)
 		const int w = options->Get().viewfinder_width;
 		const int h = options->Get().viewfinder_height;
 		cv::Mat frame(h * 3 / 2, w, CV_8UC1, buffer.data());
-		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), 0);
+		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), now_us,
+						   archive_this_frame);
 	}
 }
 

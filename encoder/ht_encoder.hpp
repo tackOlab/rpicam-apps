@@ -60,11 +60,13 @@ public:
 		output_thread_.join();
 		LOG(2, "HT_Encoder closed");
 	}
-	// Encode the given buffer.
-	void EncodeBuffer(int fd, size_t size, void *mem, StreamInfo const &info, int64_t timestamp_us)
+	// Encode the given buffer.  RTP fans out every frame; TCP archive only
+	// fires when archive_this_frame is true (caller's rate-limit decision).
+	void EncodeBuffer(int fd, size_t size, void *mem, StreamInfo const &info, int64_t timestamp_us,
+					  bool archive_this_frame = false)
 	{
 		std::lock_guard<std::mutex> lock(encode_mutex_);
-		EncodeItem item = { mem, info, timestamp_us, index_++ };
+		EncodeItem item = { mem, info, timestamp_us, index_++, archive_this_frame };
 		encode_queue_.push(item);
 		encode_cond_var_.notify_all();
 	}
@@ -120,14 +122,8 @@ private:
 				// printf("\n");
 			}
 			encode_time = (std::chrono::high_resolution_clock::now() - start_time);
-			// send codestream via persistent TCP connection (retry connect if not yet up)
-			if (!tcp_connected_)
-				tcp_connected_ = (tcp_socket_.create_client() >= 0);
-			if (tcp_connected_)
-				tcp_socket_.Tx(buf.data(), buffer_len);
 
-			// Also fan out via RFC 9828 RTP for live monitoring. Independent
-			// of TCP archive — failure here doesn't affect the TCP path.
+			// RTP fan-out: every encoded frame, for continuous live monitoring.
 			if (rtp_packetizer_.is_open())
 			{
 				// Camera timestamp is microseconds; RTP timestamp is 90 kHz ticks.
@@ -135,6 +131,16 @@ private:
 				const uint32_t ts90 = static_cast<uint32_t>(encode_item.timestamp_us * 9 / 100);
 				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90))
 					LOG(1, "HT_Encoder: RTP send_codestream failed for frame " << encode_item.index);
+			}
+
+			// TCP archive: only when caller flagged this frame (e.g. person-detected
+			// + rate-limited).  Independent of the RTP path above.
+			if (encode_item.archive)
+			{
+				if (!tcp_connected_)
+					tcp_connected_ = (tcp_socket_.create_client() >= 0);
+				if (tcp_connected_)
+					tcp_socket_.Tx(buf.data(), buffer_len);
 			}
 			printf("HT codestream size = %ld, time = %f\n", buffer_len, encode_time);
 			frames++;
@@ -207,6 +213,7 @@ private:
 		StreamInfo info;
 		int64_t timestamp_us;
 		uint64_t index;
+		bool archive;
 	};
 	std::queue<EncodeItem> encode_queue_;
 	std::mutex encode_mutex_;
