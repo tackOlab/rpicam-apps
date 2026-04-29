@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -49,7 +50,11 @@ class simple_tcp {
     if (sockfd < 0) {
       return -1;
     }
+    int nodelay = 1;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
     if (connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+      close(sockfd);
+      sockfd = -1;
       return -1;
     }
     return 0;

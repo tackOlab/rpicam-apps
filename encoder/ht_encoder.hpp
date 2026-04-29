@@ -28,13 +28,18 @@ uint8_t hotfix_for_mainheader[32] = {
 class HT_Encoder
 {
 public:
-	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options) : 
-        abortEncode_(false), 
-        abortOutput_(false), 
+	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options) :
+        abortEncode_(false),
+        abortOutput_(false),
         index_(0),
         enc(encoded_, info),
-		buf(encoded_)
+		buf(encoded_),
+		tcp_socket_("133.36.41.118", 4001),
+		tcp_connected_(false)
 	{
+		tcp_connected_ = (tcp_socket_.create_client() >= 0);
+		if (!tcp_connected_)
+			LOG(1, "HT_Encoder: TCP connect to 133.36.41.118:4001 failed; will retry per frame");
 		output_thread_ = std::thread(&HT_Encoder::outputThread, this);
 		for (int i = 0; i < NUM_ENC_THREADS; i++)
 			encode_thread_[i] = std::thread(std::bind(&HT_Encoder::encodeThread, this, i));
@@ -109,13 +114,11 @@ private:
 				// printf("\n");
 			}
 			encode_time = (std::chrono::high_resolution_clock::now() - start_time);
-			// send codestream via TCP connection
-			simple_tcp tcp_socket("133.36.41.118", 4001);
-			if (tcp_socket.create_client() >= 0)
-			{
-				// std::unique_lock<std::mutex> lock(encode_mutex_);
-				tcp_socket.Tx(buf.data(), buffer_len);
-			}
+			// send codestream via persistent TCP connection (retry connect if not yet up)
+			if (!tcp_connected_)
+				tcp_connected_ = (tcp_socket_.create_client() >= 0);
+			if (tcp_connected_)
+				tcp_socket_.Tx(buf.data(), buffer_len);
 			printf("HT codestream size = %ld, time = %f\n", buffer_len, encode_time);
 			frames++;
 			// Don't return buffers until the output thread as that's where they're
@@ -216,4 +219,6 @@ private:
 
     HTJ2KEncoder enc; // encoder instance
 	std::vector<uint8_t> &buf;
+	simple_tcp tcp_socket_;
+	bool tcp_connected_;
 };
