@@ -19,23 +19,15 @@
 
 #include "simple_tcp.hpp"
 
-uint8_t hotfix_for_mainheader[32] = {
-	0xFF,0x4F,0xFF,0x51,0x00,0x2F,0x40,0x00,
-	0x00,0x00,0x07,0x80,0x00,0x00,0x04,0x38,
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-	0x00,0x00,0x07,0x80,0x00,0x00,0x04,0x38
-};
+uint8_t hotfix_for_mainheader[32] = { 0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x2F, 0x40, 0x00, 0x00, 0x00, 0x07,
+									  0x80, 0x00, 0x00, 0x04, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									  0x00, 0x00, 0x00, 0x00, 0x07, 0x80, 0x00, 0x00, 0x04, 0x38 };
 class HT_Encoder
 {
 public:
-	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options) :
-        abortEncode_(false),
-        abortOutput_(false),
-        index_(0),
-        enc(encoded_, info),
-		buf(encoded_),
-		tcp_socket_("133.36.41.118", 4001),
-		tcp_connected_(false)
+	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options)
+		: abortEncode_(false), abortOutput_(false), index_(0), enc(encoded_, info), buf(encoded_),
+		  tcp_socket_("133.36.41.118", 4001), tcp_connected_(false)
 	{
 		tcp_connected_ = (tcp_socket_.create_client() >= 0);
 		if (!tcp_connected_)
@@ -174,7 +166,7 @@ private:
 				}
 			}
 		got_item:
-        // no need of callback
+			// no need of callback
 			// free(item.mem);
 			index++;
 		}
@@ -197,12 +189,11 @@ private:
 	std::thread encode_thread_[NUM_ENC_THREADS];
 	void encodeHTJ2K(EncodeItem &item, std::vector<uint8_t> &out, size_t &buffer_len)
 	{
-        enc.setSourceImage((uint8_t *)item.mem, item.info.width * item.info.height * 3);
-        enc.encode();
-        out = enc.getEncodedBytes();
-        // encoded_buffer = out.data();
-        buffer_len = out.size();
-
+		enc.setSourceImage((uint8_t *)item.mem, item.info.width * item.info.height * 3);
+		enc.encode();
+		out = enc.getEncodedBytes();
+		// encoded_buffer = out.data();
+		buffer_len = out.size();
 	}
 
 	struct OutputItem
@@ -217,7 +208,7 @@ private:
 	std::condition_variable output_cond_var_;
 	std::thread output_thread_;
 
-    HTJ2KEncoder enc; // encoder instance
+	HTJ2KEncoder enc; // encoder instance
 	std::vector<uint8_t> &buf;
 	simple_tcp tcp_socket_;
 	bool tcp_connected_;

@@ -78,7 +78,7 @@ bool ObjectDetectDrawCvStage::Process(CompletedRequestPtr &completed_request)
 	Mat tmp;
 	cvtColor(image, tmp, COLOR_YUV2BGR_I420);
 	// printf("orig: %x, before = %x", ptr, image.data); // for DEBUGGING address of ptr
-	
+
 	// Scalar colour = Scalar(255, 255, 255);
 	Scalar YELLOW = Scalar(0, 255, 255);
 	Scalar BLUE = Scalar(255, 178, 50);
