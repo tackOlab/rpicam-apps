@@ -1,5 +1,10 @@
 default_stages: [pre-commit]
 
+# subprojects/ is upstream-controlled (kakadujs from Chris Hafey + the
+# licensed Kakadu SDK tree). We do not own its style and must not modify
+# it — exclude from all pre-commit hooks.
+exclude: '^subprojects/'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
