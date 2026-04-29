@@ -239,6 +239,10 @@ Options::Options()
 			"Set the file name for configuring the post-processing")
 		("post-process-libs", value<std::string>(&v_->post_process_libs),
 			"Set a custom location for the post-processing library .so files")
+		("rtp-host", value<std::string>(&v_->rtp_host)->default_value("127.0.0.1"),
+			"Destination IP for the RFC 9828 RTP fan-out from HT_Encoder")
+		("rtp-port", value<int>(&v_->rtp_port)->default_value(6000),
+			"Destination UDP port for the RFC 9828 RTP fan-out from HT_Encoder")
 		("nopreview,n", value<bool>(&v_->nopreview)->default_value(false)->implicit_value(true),
 			"Do not show a preview window")
 		("preview,p", value<std::string>(&v_->preview)->default_value("0,0,0,0"),

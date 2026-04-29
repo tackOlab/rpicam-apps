@@ -335,6 +335,10 @@ struct OptsInternal
 
 	std::string preview_libs;
 	std::string encoder_libs;
+
+	// RFC 9828 RTP destination for the live-monitoring fan-out in HT_Encoder.
+	std::string rtp_host;
+	int rtp_port;
 };
 
 struct Options
