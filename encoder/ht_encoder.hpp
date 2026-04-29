@@ -20,11 +20,6 @@
 #include "simple_tcp.hpp"
 #include "rfc9828_packetizer.hpp"
 
-// RFC 9828 RTP destination for live monitoring. Independent of the TCP archive
-// destination; receiver is osamu620/OpenHTJ2K's rtp_recv (default :6000).
-static constexpr const char *RTP_DST_HOST = "127.0.0.1";
-static constexpr int RTP_DST_PORT = 6000;
-
 uint8_t hotfix_for_mainheader[32] = { 0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x2F, 0x40, 0x00, 0x00, 0x00, 0x07,
 									  0x80, 0x00, 0x00, 0x04, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 									  0x00, 0x00, 0x00, 0x00, 0x07, 0x80, 0x00, 0x00, 0x04, 0x38 };
@@ -34,13 +29,17 @@ public:
 	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options)
 		: abortEncode_(false), abortOutput_(false), index_(0), enc(encoded_, info), buf(encoded_),
 		  tcp_socket_("133.36.41.118", 4001), tcp_connected_(false),
-		  rtp_packetizer_(RTP_DST_HOST, RTP_DST_PORT)
+		  rtp_packetizer_(options->Get().rtp_host, options->Get().rtp_port)
 	{
 		tcp_connected_ = (tcp_socket_.create_client() >= 0);
 		if (!tcp_connected_)
 			LOG(1, "HT_Encoder: TCP connect to 133.36.41.118:4001 failed; will retry per frame");
 		if (!rtp_packetizer_.is_open())
-			LOG(1, "HT_Encoder: RTP UDP socket open failed for " << RTP_DST_HOST << ":" << RTP_DST_PORT);
+			LOG(1, "HT_Encoder: RTP UDP socket open failed for "
+					   << options->Get().rtp_host << ":" << options->Get().rtp_port);
+		else
+			LOG(2, "HT_Encoder: RTP fan-out -> " << options->Get().rtp_host << ":"
+												 << options->Get().rtp_port);
 		output_thread_ = std::thread(&HT_Encoder::outputThread, this);
 		for (int i = 0; i < NUM_ENC_THREADS; i++)
 			encode_thread_[i] = std::thread(std::bind(&HT_Encoder::encodeThread, this, i));
