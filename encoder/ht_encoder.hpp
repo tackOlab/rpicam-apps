@@ -18,6 +18,12 @@
 #include "subprojects/kakadujs/src/HTJ2KEncoder.hpp"
 
 #include "simple_tcp.hpp"
+#include "rfc9828_packetizer.hpp"
+
+// RFC 9828 RTP destination for live monitoring. Independent of the TCP archive
+// destination; receiver is osamu620/OpenHTJ2K's rtp_recv (default :6000).
+static constexpr const char *RTP_DST_HOST = "127.0.0.1";
+static constexpr int RTP_DST_PORT = 6000;
 
 uint8_t hotfix_for_mainheader[32] = { 0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x2F, 0x40, 0x00, 0x00, 0x00, 0x07,
 									  0x80, 0x00, 0x00, 0x04, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -27,11 +33,14 @@ class HT_Encoder
 public:
 	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options)
 		: abortEncode_(false), abortOutput_(false), index_(0), enc(encoded_, info), buf(encoded_),
-		  tcp_socket_("133.36.41.118", 4001), tcp_connected_(false)
+		  tcp_socket_("133.36.41.118", 4001), tcp_connected_(false),
+		  rtp_packetizer_(RTP_DST_HOST, RTP_DST_PORT)
 	{
 		tcp_connected_ = (tcp_socket_.create_client() >= 0);
 		if (!tcp_connected_)
 			LOG(1, "HT_Encoder: TCP connect to 133.36.41.118:4001 failed; will retry per frame");
+		if (!rtp_packetizer_.is_open())
+			LOG(1, "HT_Encoder: RTP UDP socket open failed for " << RTP_DST_HOST << ":" << RTP_DST_PORT);
 		output_thread_ = std::thread(&HT_Encoder::outputThread, this);
 		for (int i = 0; i < NUM_ENC_THREADS; i++)
 			encode_thread_[i] = std::thread(std::bind(&HT_Encoder::encodeThread, this, i));
@@ -111,6 +120,17 @@ private:
 				tcp_connected_ = (tcp_socket_.create_client() >= 0);
 			if (tcp_connected_)
 				tcp_socket_.Tx(buf.data(), buffer_len);
+
+			// Also fan out via RFC 9828 RTP for live monitoring. Independent
+			// of TCP archive — failure here doesn't affect the TCP path.
+			if (rtp_packetizer_.is_open())
+			{
+				// Camera timestamp is microseconds; RTP timestamp is 90 kHz ticks.
+				// us * 9 / 100 = us * 90 / 1000 with less overflow risk on int64.
+				const uint32_t ts90 = static_cast<uint32_t>(encode_item.timestamp_us * 9 / 100);
+				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90))
+					LOG(1, "HT_Encoder: RTP send_codestream failed for frame " << encode_item.index);
+			}
 			printf("HT codestream size = %ld, time = %f\n", buffer_len, encode_time);
 			frames++;
 			// Don't return buffers until the output thread as that's where they're
@@ -212,4 +232,5 @@ private:
 	std::vector<uint8_t> &buf;
 	simple_tcp tcp_socket_;
 	bool tcp_connected_;
+	RFC9828Packetizer rtp_packetizer_;
 };
