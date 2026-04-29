@@ -18,7 +18,14 @@
 
 using namespace std::placeholders;
 
-enum progression { LRCP, RLCP, RPCL, PCRL, CPRL };
+enum progression
+{
+	LRCP,
+	RLCP,
+	RPCL,
+	PCRL,
+	CPRL
+};
 
 // The main event loop for the application.
 
@@ -28,11 +35,12 @@ static void event_loop(RPiCamApp &app)
 
 	app.OpenCamera();
 	app.ConfigureViewfinder();
-	
+
 	// Setup HTJ2K encoder
 	std::vector<uint8_t> encbuf; // codestream buffer
-  	encbuf.reserve(options->Get().viewfinder_width * options->Get().viewfinder_height * 3);
-  	const FrameInfo finfo = {static_cast<uint16_t>(options->Get().viewfinder_width), static_cast<uint16_t>(options->Get().viewfinder_height), 8, 3, false};
+	encbuf.reserve(options->Get().viewfinder_width * options->Get().viewfinder_height * 3);
+	const FrameInfo finfo = { static_cast<uint16_t>(options->Get().viewfinder_width),
+							  static_cast<uint16_t>(options->Get().viewfinder_height), 8, 3, false };
 	// HTJ2KEncoder encoder(encbuf, finfo); // encoder instance
 	HT_Encoder htenc(encbuf, finfo, options);
 
