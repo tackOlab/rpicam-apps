@@ -6,6 +6,9 @@
  */
 
 #include <algorithm>
+#include <array>
+#include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <sys/mman.h>
@@ -13,6 +16,8 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
+
+#include "core/dl_lib.hpp"
 
 #include "hailo_postprocessing_stage.hpp"
 
@@ -68,7 +73,9 @@ public:
 
 	static VDevice *get_instance()
 	{
-		static std::unique_ptr<VDevice> _vdevice {};
+		// Deliberately leaked to avoid a segfault in libhailort's
+		// VDevice destructor during static destruction at exit.
+		static VDevice *_vdevice = nullptr;
 
 		if (!_vdevice)
 		{
@@ -78,18 +85,53 @@ public:
 				LOG_ERROR("Failed create vdevice, status = " << vdevice_exp.status());
 				return nullptr;
 			}
-			_vdevice = vdevice_exp.release();
+			_vdevice = vdevice_exp.release().release();
 		}
 
-		return _vdevice.get();
+		return _vdevice;
 	}
 
 private:
-	vdevice() {}
+	vdevice()
+	{
+	}
 };
 
-} // namespace
+// Sigh :(
+std::string get_hailo_architecture()
+{
+	const std::string cmd("hailortcli fw-control identify");
+	const std::string target_label("Device Architecture: ");
+	std::array<char, 128> buffer;
 
+	auto deleter = [](FILE *f)
+	{
+		pclose(f);
+	};
+	std::unique_ptr<FILE, decltype(deleter)> pipe(popen(cmd.c_str(), "r"), deleter);
+
+	if (!pipe)
+	{
+		LOG_ERROR("Could not open pipe for Hailo identify");
+		return {};
+	}
+
+	while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
+	{
+		std::string line(buffer.data());
+		size_t pos = line.find(target_label);
+		if (pos != std::string::npos)
+		{
+			std::string arch = line.substr(pos + target_label.length());
+			arch.erase(arch.find_last_not_of(" \n\r\t") + 1);
+			return arch;
+		}
+	}
+
+	return {};
+}
+
+} // namespace
 
 Allocator::Allocator()
 {
@@ -140,8 +182,8 @@ void Allocator::free(uint8_t *ptr)
 {
 	std::scoped_lock<std::mutex> l(lock_);
 
-	auto info =	std::find_if(alloc_info_.begin(), alloc_info_.end(),
-							 [ptr](const AllocInfo &info) { return info.ptr == ptr; });
+	auto info =
+		std::find_if(alloc_info_.begin(), alloc_info_.end(), [ptr](const AllocInfo &info) { return info.ptr == ptr; });
 	if (info != alloc_info_.end())
 		info->free = true;
 }
@@ -162,6 +204,7 @@ void HailoPostProcessingStage::Read(boost::property_tree::ptree const &params)
 	hef_file_ = params.get<std::string>("hef_file", "");
 	hef_file_8_ = params.get<std::string>("hef_file_8", "");
 	hef_file_8L_ = params.get<std::string>("hef_file_8L", "");
+	hef_file_10_ = params.get<std::string>("hef_file_10", "");
 }
 
 void HailoPostProcessingStage::Configure()
@@ -193,16 +236,26 @@ int HailoPostProcessingStage::configureHailoRT()
 		return -1;
 	}
 
-	// Pull the device id.
-	auto devices = vdevice_->get_physical_devices().release();
-	device_id_ = devices[0].get().identify().release();
+	std::string device = get_hailo_architecture();
+	if (device.empty())
+	{
+		LOG_ERROR("Defaulting to HAILO8 architecture");
+		device = "HAILO8";
+	}
+	else
+		LOG(1, "Hailo device: " << device);
 
 	std::string hef_file;
-	if (device_id_.device_architecture == HAILO_ARCH_HAILO8 && !hef_file_8_.empty())
+	if (device == "HAILO10H")
+		hef_file = hef_file_10_;
+	else if (device == "HAILO8")
 		hef_file = hef_file_8_;
-	else if (!hef_file_8L_.empty())
+	else if (device == "HAILO8L")
 		hef_file = hef_file_8L_;
 	else
+		LOG_ERROR("Unexpected Hailo architecture detected: " << device);
+
+	if (hef_file.empty())
 		hef_file = hef_file_;
 
 	if (hef_file.empty())
@@ -306,8 +359,8 @@ hailo_status HailoPostProcessingStage::DispatchJob(const uint8_t *input, AsyncIn
 		const auto frame_time = std::chrono::duration_cast<std::chrono::milliseconds>(this_frame - last_frame_);
 
 		if (frame_time < inf_time)
-			LOG(2, "Warning: model inferencing time of " << inf_time.count() << "ms " <<
-				   "> current job interval of " << frame_time.count() << "ms!");
+			LOG(2, "Warning: model inferencing time of " << inf_time.count() << "ms " << "> current job interval of "
+														 << frame_time.count() << "ms!");
 	}
 
 	last_frame_ = this_frame;
@@ -333,17 +386,31 @@ HailoROIPtr HailoPostProcessingStage::MakeROI(const std::vector<OutTensor> &outp
 
 	for (auto const &t : output_tensors)
 	{
-		hailo_vstream_info_t info;
+		hailo_tensor_metadata_t info;
 
 		strncpy(info.name, t.name.c_str(), sizeof(info.name));
 		// To keep GCC quiet...
 		info.name[HAILO_MAX_STREAM_NAME_SIZE - 1] = '\0';
-		info.format = t.format;
-		info.quant_info = t.quant_info;
-		if (HailoRTCommon::is_nms(info))
-			info.nms_shape = infer_model_->outputs()[0].get_nms_shape().release();
+		info.format.type = (HailoTensorFormatType)t.format.type;
+		info.format.is_nms = infer_model_->outputs()[0].is_nms();
+		info.quant_info.qp_zp = t.quant_info.qp_zp;
+		info.quant_info.qp_scale = t.quant_info.qp_scale;
+		info.quant_info.limvals_min = t.quant_info.limvals_min;
+		info.quant_info.limvals_max = t.quant_info.limvals_max;
+		if (info.format.is_nms)
+		{
+			auto i = infer_model_->outputs()[0].get_nms_shape().release();
+			info.nms_shape.number_of_classes = i.number_of_classes;
+			info.nms_shape.max_bboxes_per_class = i.max_bboxes_per_class;
+			info.nms_shape.max_bboxes_total = i.max_bboxes_total;
+			info.nms_shape.max_accumulated_mask_size = i.max_accumulated_mask_size;
+		}
 		else
-			info.shape = t.shape;
+		{
+			info.shape.height = t.shape.height;
+			info.shape.width = t.shape.width;
+			info.shape.features = t.shape.features;
+		}
 
 		roi->add_tensor(std::make_shared<HailoTensor>(t.data.get(), info));
 	}
@@ -405,9 +472,8 @@ void Display::displayThread()
 					ptr += 3;
 				}
 			}
-			
-			cv::Mat image(msg.size.height, msg.size.width, CV_8UC3, (void *)current_image.get(),
-						  msg.size.width * 3);
+
+			cv::Mat image(msg.size.height, msg.size.width, CV_8UC3, (void *)current_image.get(), msg.size.width * 3);
 
 			cv::imshow(msg.window_title, image);
 			cv::resizeWindow(msg.window_title, cv::Size(320, 320));

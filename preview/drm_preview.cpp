@@ -36,7 +36,9 @@ public:
 private:
 	struct Buffer
 	{
-		Buffer() : fd(-1) {}
+		Buffer() : fd(-1)
+		{
+		}
 		int fd;
 		size_t size;
 		StreamInfo info;
@@ -174,7 +176,7 @@ void DrmPreview::findCrtc()
 		throw std::runtime_error("connector supports no mode");
 	}
 
-	if (options_->fullscreen || width_ == 0 || height_ == 0)
+	if (options_->Get().fullscreen || width_ == 0 || height_ == 0)
 	{
 		drmModeCrtc *crtc = drmModeGetCrtc(drmfd_, crtcId_);
 		x_ = crtc->x;
@@ -248,10 +250,10 @@ DrmPreview::DrmPreview(Options const *options) : Preview(options), last_fd_(-1),
 	if (drmfd_ < 0)
 		throw std::runtime_error("drmOpen failed: " + std::string(ERRSTR));
 
-	x_ = options_->preview_x;
-	y_ = options_->preview_y;
-	width_ = options_->preview_width;
-	height_ = options_->preview_height;
+	x_ = options_->Get().preview_x;
+	y_ = options_->Get().preview_y;
+	width_ = options_->Get().preview_width;
+	height_ = options_->Get().preview_height;
 	screen_width_ = 0;
 	screen_height_ = 0;
 
@@ -272,7 +274,7 @@ DrmPreview::DrmPreview(Options const *options) : Preview(options), last_fd_(-1),
 	}
 
 	// Default behaviour here is to go fullscreen.
-	if (options_->fullscreen || width_ == 0 || height_ == 0 || x_ + width_ > screen_width_ ||
+	if (options_->Get().fullscreen || width_ == 0 || height_ == 0 || x_ + width_ > screen_width_ ||
 		y_ + height_ > screen_height_)
 	{
 		x_ = y_ = 0;
@@ -380,8 +382,8 @@ void DrmPreview::makeBuffer(int fd, size_t size, StreamInfo const &info, Buffer 
 	if (drmPrimeFDToHandle(drmfd_, fd, &buffer.bo_handle))
 		throw std::runtime_error("drmPrimeFDToHandle failed for fd " + std::to_string(fd));
 
-	uint32_t offsets[4] =
-		{ 0, info.stride * info.height, info.stride * info.height + (info.stride / 2) * (info.height / 2) };
+	uint32_t offsets[4] = { 0, info.stride * info.height,
+							info.stride * info.height + (info.stride / 2) * (info.height / 2) };
 	uint32_t pitches[4] = { info.stride, info.stride / 2, info.stride / 2 };
 	uint32_t bo_handles[4] = { buffer.bo_handle, buffer.bo_handle, buffer.bo_handle };
 
@@ -428,7 +430,9 @@ void DrmPreview::Reset()
 	first_time_ = true;
 }
 
-Preview *make_drm_preview(Options const *options)
+static Preview *Create(Options const *options)
 {
 	return new DrmPreview(options);
 }
+
+static RegisterPreview reg("drm", &Create);

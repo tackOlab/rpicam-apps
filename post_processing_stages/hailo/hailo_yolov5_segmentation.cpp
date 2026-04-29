@@ -185,7 +185,7 @@ public:
 private:
 	bool runInference(uint8_t *input, uint32_t *output);
 
-	PostProcessingLib postproc_;
+	DlLib postproc_;
 	Yolov5segParams *yolo_params_ = nullptr;
 
 	// Config params
@@ -221,10 +221,10 @@ void YoloSegmentation::Read(boost::property_tree::ptree const &params)
 	confidence_threshold_ = params.get<float>("confidence_threshold", 0.6);
 
 	InitFuncPtr init = reinterpret_cast<InitFuncPtr>(postproc_.GetSymbol("init"));
-	const std::string config_file = params.get<std::string>("hailopp_config_file");
+	const std::string config_file = params.get<std::string>("hailopp_config_file", "");
 	if (init)
 	{
-		if (!fs::exists(config_file))
+		if (!config_file.empty() && !fs::exists(config_file))
 			throw std::runtime_error(std::string("hailo postprocess config file not found: ") + config_file);
 		yolo_params_ = init(config_file, "");
 	}
@@ -338,11 +338,11 @@ bool YoloSegmentation::runInference(uint8_t *input, uint32_t *output)
 
 		auto bbox = detection->get_bbox();
 
-		cv::rectangle(image, cv::Point2f(bbox.xmin() * float(InputTensorSize().width),
-										 bbox.ymin() * float(InputTensorSize().height)),
-							 cv::Point2f(bbox.xmax() * float(InputTensorSize().width),
-										 bbox.ymax() * float(InputTensorSize().height)),
-					  cv::Scalar(0, 0, 255), 1);
+		cv::rectangle(
+			image,
+			cv::Point2f(bbox.xmin() * float(InputTensorSize().width), bbox.ymin() * float(InputTensorSize().height)),
+			cv::Point2f(bbox.xmax() * float(InputTensorSize().width), bbox.ymax() * float(InputTensorSize().height)),
+			cv::Scalar(0, 0, 255), 1);
 
 		draw_all(image, detection, 0);
 	}

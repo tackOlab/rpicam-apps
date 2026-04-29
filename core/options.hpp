@@ -27,15 +27,23 @@ static constexpr double DEFAULT_FRAMERATE = 30.0;
 
 struct Mode
 {
-	Mode() : Mode(0, 0, 0, true) {}
-	Mode(unsigned int w, unsigned int h, unsigned int b, bool p) : width(w), height(h), bit_depth(b), packed(p), framerate(0) {}
+	Mode() : Mode(0, 0, 0, true)
+	{
+	}
+	Mode(unsigned int w, unsigned int h, unsigned int b, bool p)
+		: width(w), height(h), bit_depth(b), packed(p), framerate(0)
+	{
+	}
 	Mode(std::string const &mode_string);
 	unsigned int width;
 	unsigned int height;
 	unsigned int bit_depth;
 	bool packed;
 	double framerate;
-	libcamera::Size Size() const { return libcamera::Size(width, height); }
+	libcamera::Size Size() const
+	{
+		return libcamera::Size(width, height);
+	}
 	std::string ToString() const;
 	void update(const libcamera::Size &size, const std::optional<float> &fps);
 };
@@ -43,10 +51,13 @@ struct Mode
 template <typename DEFAULT>
 struct TimeVal
 {
-	TimeVal() : value(0) {}
+	TimeVal() : value(0)
+	{
+	}
 
 	void set(const std::string &s)
 	{
+		// clang-format off
 		static const std::map<std::string, std::chrono::nanoseconds> match
 		{
 			{ "min", std::chrono::minutes(1) },
@@ -56,6 +67,7 @@ struct TimeVal
 			{ "us", std::chrono::microseconds(1) },
 			{ "ns", std::chrono::nanoseconds(1) },
 		};
+		// clang-format on
 
 		try
 		{
@@ -92,6 +104,74 @@ struct TimeVal
 	std::chrono::nanoseconds value;
 };
 
+struct Bitrate
+{
+public:
+	Bitrate() : bps_(0)
+	{
+	}
+
+	void set(const std::string &s)
+	{
+		// clang-format off
+		static const std::map<std::string, uint64_t> match
+		{
+			{ "bps", 1 },
+			{ "b", 1 },
+			{ "kbps", 1000 },
+			{ "k", 1000 },
+			{ "K", 1000 },
+			{ "mbps", 1000 * 1000 },
+			{ "m", 1000 * 1000 },
+			{ "M", 1000 },
+		};
+		// clang-format on
+
+		try
+		{
+			std::size_t end_pos;
+			float f = std::stof(s, &end_pos);
+			bps_ = f;
+
+			for (const auto &m : match)
+			{
+				auto found = s.find(m.first, end_pos);
+				if (found != end_pos || found + m.first.length() != s.length())
+					continue;
+				bps_ = f * m.second;
+				break;
+			}
+		}
+		catch (std::exception const &e)
+		{
+			throw std::runtime_error("Invalid bitrate string provided");
+		}
+	}
+
+	uint64_t bps() const
+	{
+		return bps_;
+	}
+
+	uint64_t kbps() const
+	{
+		return bps_ / 1000;
+	}
+
+	uint64_t mbps() const
+	{
+		return bps_ / (1000 * 1000);
+	}
+
+	explicit constexpr operator bool() const
+	{
+		return !!bps_;
+	}
+
+private:
+	uint64_t bps_;
+};
+
 enum class Platform
 {
 	MISSING,
@@ -101,10 +181,20 @@ enum class Platform
 	PISP,
 };
 
-struct Options
+struct OptsInternal
 {
-	Options();
-	virtual ~Options() {}
+	OptsInternal() : set_default_lens_position(false), af_on_capture(false)
+	{
+	}
+
+	bool Parse(boost::program_options::variables_map &vm, RPiCamApp *app);
+	void Print() const;
+
+	bool ParseVideo();
+	void PrintVideo() const;
+
+	bool ParseStill();
+	void PrintStill() const;
 
 	bool help;
 	bool version;
@@ -136,6 +226,8 @@ struct Options
 	std::string awbgains;
 	float awb_gain_r;
 	float awb_gain_b;
+	std::string ccm;
+	float ccm_values[9];
 	bool flush;
 	unsigned int wrap;
 	float brightness;
@@ -175,17 +267,6 @@ struct Options
 	std::string hdr;
 	TimeVal<std::chrono::microseconds> flicker_period;
 	bool no_raw;
-
-	virtual bool Parse(int argc, char *argv[]);
-	virtual void Print() const;
-
-	void SetApp(RPiCamApp *app) { app_ = app; }
-	Platform GetPlatform() const { return platform_; };
-
-protected:
-	boost::program_options::options_description options_;
-
-private:
 	bool hflip_;
 	bool vflip_;
 	int rotation_;
@@ -194,6 +275,104 @@ private:
 	std::string timeout_;
 	std::string shutter_;
 	std::string flicker_period_;
+
+	Bitrate bitrate;
+	std::string profile;
+	std::string level;
+	unsigned int intra;
+	bool inline_headers;
+	std::string codec;
+	std::string libav_video_codec;
+	std::string libav_video_codec_opts;
+	std::string libav_format;
+	bool libav_audio;
+	std::string audio_codec;
+	std::string audio_device;
+	std::string audio_source;
+	uint32_t audio_channels;
+	Bitrate audio_bitrate;
+	uint32_t audio_samplerate;
+	TimeVal<std::chrono::microseconds> av_sync;
+	std::string save_pts;
+	int quality;
+	bool listen;
+	bool keypress;
+	bool signal;
+	std::string initial;
+	bool pause;
+	bool split;
+	uint32_t segment;
+	size_t circular;
+	uint32_t frames;
+	bool low_latency;
+#ifndef DISABLE_RPI_FEATURES
+	uint32_t sync;
+#endif
+	std::string bitrate_;
+	std::string av_sync_;
+	std::string audio_bitrate_;
+#ifndef DISABLE_RPI_FEATURES
+	std::string sync_;
+#endif
+
+	//int quality;
+	std::vector<std::string> exif;
+	TimeVal<std::chrono::milliseconds> timelapse;
+	uint32_t framestart;
+	bool datetime;
+	bool timestamp;
+	unsigned int restart;
+	//bool keypress;
+	//bool signal;
+	std::string thumb;
+	unsigned int thumb_width, thumb_height, thumb_quality;
+	std::string encoding;
+	bool raw;
+	std::string latest;
+	bool immediate;
+	bool zsl;
+	std::string timelapse_;
+
+	std::string preview_libs;
+	std::string encoder_libs;
+};
+
+struct Options
+{
+	Options();
+	virtual ~Options()
+	{
+	}
+
+	virtual bool Parse(int argc, char *argv[]);
+	virtual void Print() const
+	{
+		v_->Print();
+	}
+
+	const OptsInternal &Get() const
+	{
+		return *v_.get();
+	}
+	OptsInternal &Set() const
+	{
+		return *v_.get();
+	}
+
+	void SetApp(RPiCamApp *app)
+	{
+		app_ = app;
+	}
+	Platform GetPlatform() const
+	{
+		return platform_;
+	};
+
+protected:
+	std::unique_ptr<boost::program_options::options_description> options_;
+	std::unique_ptr<OptsInternal> v_ = std::make_unique<OptsInternal>();
+
+private:
 	RPiCamApp *app_;
 	Platform platform_ = Platform::UNKNOWN;
 };
