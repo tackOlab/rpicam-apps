@@ -339,6 +339,12 @@ struct OptsInternal
 	// RFC 9828 RTP destination for the live-monitoring fan-out in HT_Encoder.
 	std::string rtp_host;
 	int rtp_port;
+	// H.273 colorspace codes written into the Main packet header (S=1).
+	// Defaults are sYCC: BT.709 primaries, sRGB transfer, BT.601 matrix, full range.
+	int rtp_prims;
+	int rtp_trans;
+	int rtp_mat;
+	bool rtp_range;
 };
 
 struct Options

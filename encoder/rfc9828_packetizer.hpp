@@ -50,9 +50,21 @@ public:
 	static constexpr size_t MAIN_HEADER_BYTES = 8;
 	static constexpr size_t BODY_HEADER_BYTES = 8;
 
-	RFC9828Packetizer(const std::string &dst_host, int dst_port,
+	// H.273 colorspace fields written into the Main packet when colorspace_set
+	// is true (S=1 in the spec).  When colorspace_set is false (S=0), receivers
+	// fall back to their CLI/UI configuration to interpret the codestream.
+	struct Colorspace
+	{
+		bool colorspace_set = true;
+		uint8_t prims = 1;   // H.273 ColourPrimaries: 1 = BT.709 / sRGB
+		uint8_t trans = 13;  // H.273 TransferCharacteristics: 13 = sRGB
+		uint8_t mat = 5;     // H.273 MatrixCoefficients: 5 = BT.470BG / BT.601 525
+		bool full_range = true;
+	};
+
+	RFC9828Packetizer(const std::string &dst_host, int dst_port, Colorspace cs,
 					  uint8_t ordh = ORDH_RPCL_RESYNC)
-		: sock_(dst_host, dst_port), seq_(0), ordh_(ordh)
+		: sock_(dst_host, dst_port), seq_(0), ordh_(ordh), cs_(cs)
 	{
 	}
 
@@ -105,12 +117,25 @@ private:
 		dg.push_back(0x00);
 		// Byte 3: ESEQ=0
 		dg.push_back(0x00);
-		// Byte 4: R=0 S=0 C=0 RSVD=0 RANGE=0
-		dg.push_back(0x00);
-		// Bytes 5-7: PRIMS=0 TRANS=0 MAT=0 (S=0, receiver uses --colorspace fallback)
-		dg.push_back(0x00);
-		dg.push_back(0x00);
-		dg.push_back(0x00);
+		// Byte 4: R(1)=0 | S(1) | C(1)=0 | RSVD(4)=0 | RANGE(1)
+		// Bytes 5-7: PRIMS, TRANS, MAT (per H.273; meaningful only when S=1).
+		// When S=0 the spec requires bytes 4..7 to be all zero, so we hand-build
+		// either layout here.
+		if (cs_.colorspace_set)
+		{
+			uint8_t b4 = static_cast<uint8_t>(0x40 /* S=1 */ | (cs_.full_range ? 0x01 : 0x00));
+			dg.push_back(b4);
+			dg.push_back(cs_.prims);
+			dg.push_back(cs_.trans);
+			dg.push_back(cs_.mat);
+		}
+		else
+		{
+			dg.push_back(0x00);
+			dg.push_back(0x00);
+			dg.push_back(0x00);
+			dg.push_back(0x00);
+		}
 
 		dg.insert(dg.end(), cs_chunk, cs_chunk + chunk_len);
 		return sock_.sendto_one(dg.data(), dg.size());
@@ -166,4 +191,5 @@ private:
 	simple_udp_client sock_;
 	uint16_t seq_;
 	uint8_t ordh_;
+	Colorspace cs_;
 };

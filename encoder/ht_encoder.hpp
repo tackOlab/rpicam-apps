@@ -29,7 +29,13 @@ public:
 	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options)
 		: abortEncode_(false), abortOutput_(false), index_(0), enc(encoded_, info), buf(encoded_),
 		  tcp_socket_("133.36.41.118", 4001), tcp_connected_(false),
-		  rtp_packetizer_(options->Get().rtp_host, options->Get().rtp_port)
+		  rtp_packetizer_(options->Get().rtp_host, options->Get().rtp_port,
+						  RFC9828Packetizer::Colorspace{
+							  /*colorspace_set=*/true,
+							  static_cast<uint8_t>(options->Get().rtp_prims),
+							  static_cast<uint8_t>(options->Get().rtp_trans),
+							  static_cast<uint8_t>(options->Get().rtp_mat),
+							  options->Get().rtp_range })
 	{
 		tcp_connected_ = (tcp_socket_.create_client() >= 0);
 		if (!tcp_connected_)
