@@ -239,6 +239,18 @@ Options::Options()
 			"Set the file name for configuring the post-processing")
 		("post-process-libs", value<std::string>(&v_->post_process_libs),
 			"Set a custom location for the post-processing library .so files")
+		("rtp-host", value<std::string>(&v_->rtp_host)->default_value("127.0.0.1"),
+			"Destination IP for the RFC 9828 RTP fan-out from HT_Encoder")
+		("rtp-port", value<int>(&v_->rtp_port)->default_value(6000),
+			"Destination UDP port for the RFC 9828 RTP fan-out from HT_Encoder")
+		("rtp-prims", value<int>(&v_->rtp_prims)->default_value(1),
+			"H.273 ColourPrimaries written to the RTP Main packet (default 1 = BT.709/sRGB)")
+		("rtp-trans", value<int>(&v_->rtp_trans)->default_value(13),
+			"H.273 TransferCharacteristics written to the RTP Main packet (default 13 = sRGB/IEC 61966-2-1)")
+		("rtp-mat", value<int>(&v_->rtp_mat)->default_value(5),
+			"H.273 MatrixCoefficients written to the RTP Main packet (default 5 = BT.470BG/BT.601 525)")
+		("rtp-range", value<bool>(&v_->rtp_range)->default_value(true)->implicit_value(true),
+			"RTP VideoFullRangeFlag (default true = full range; false = narrow/limited)")
 		("nopreview,n", value<bool>(&v_->nopreview)->default_value(false)->implicit_value(true),
 			"Do not show a preview window")
 		("preview,p", value<std::string>(&v_->preview)->default_value("0,0,0,0"),
