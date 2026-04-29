@@ -56,19 +56,21 @@ public:
 	struct Colorspace
 	{
 		bool colorspace_set = true;
-		uint8_t prims = 1;   // H.273 ColourPrimaries: 1 = BT.709 / sRGB
-		uint8_t trans = 13;  // H.273 TransferCharacteristics: 13 = sRGB
-		uint8_t mat = 5;     // H.273 MatrixCoefficients: 5 = BT.470BG / BT.601 525
+		uint8_t prims = 1; // H.273 ColourPrimaries: 1 = BT.709 / sRGB
+		uint8_t trans = 13; // H.273 TransferCharacteristics: 13 = sRGB
+		uint8_t mat = 5; // H.273 MatrixCoefficients: 5 = BT.470BG / BT.601 525
 		bool full_range = true;
 	};
 
-	RFC9828Packetizer(const std::string &dst_host, int dst_port, Colorspace cs,
-					  uint8_t ordh = ORDH_RPCL_RESYNC)
+	RFC9828Packetizer(const std::string &dst_host, int dst_port, Colorspace cs, uint8_t ordh = ORDH_RPCL_RESYNC)
 		: sock_(dst_host, dst_port), seq_(0), ordh_(ordh), cs_(cs)
 	{
 	}
 
-	bool is_open() const { return sock_.is_open(); }
+	bool is_open() const
+	{
+		return sock_.is_open();
+	}
 
 	// Packetize and send one HTJ2K codestream as 1+N RTP datagrams.
 	// `timestamp90` is the per-frame 32-bit RTP timestamp (90 kHz); the same
@@ -102,8 +104,7 @@ public:
 	}
 
 private:
-	bool send_main_packet(const uint8_t *cs_chunk, size_t chunk_len, uint8_t mh,
-						  uint32_t ts, bool marker)
+	bool send_main_packet(const uint8_t *cs_chunk, size_t chunk_len, uint8_t mh, uint32_t ts, bool marker)
 	{
 		std::vector<uint8_t> dg;
 		dg.reserve(RTP_HEADER_BYTES + MAIN_HEADER_BYTES + chunk_len);
@@ -141,8 +142,7 @@ private:
 		return sock_.sendto_one(dg.data(), dg.size());
 	}
 
-	bool send_body_packet(const uint8_t *cs_chunk, size_t chunk_len, uint32_t ts,
-						  bool marker)
+	bool send_body_packet(const uint8_t *cs_chunk, size_t chunk_len, uint32_t ts, bool marker)
 	{
 		std::vector<uint8_t> dg;
 		dg.reserve(RTP_HEADER_BYTES + BODY_HEADER_BYTES + chunk_len);

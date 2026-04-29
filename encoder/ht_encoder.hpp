@@ -17,8 +17,8 @@
 
 #include "subprojects/kakadujs/src/HTJ2KEncoder.hpp"
 
-#include "simple_tcp.hpp"
 #include "rfc9828_packetizer.hpp"
+#include "simple_tcp.hpp"
 
 uint8_t hotfix_for_mainheader[32] = { 0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x2F, 0x40, 0x00, 0x00, 0x00, 0x07,
 									  0x80, 0x00, 0x00, 0x04, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -29,23 +29,20 @@ public:
 	HT_Encoder(std::vector<uint8_t> &encoded_, const FrameInfo &info, Options const *options)
 		: abortEncode_(false), abortOutput_(false), index_(0), enc(encoded_, info), buf(encoded_),
 		  tcp_socket_("133.36.41.118", 4001), tcp_connected_(false),
-		  rtp_packetizer_(options->Get().rtp_host, options->Get().rtp_port,
-						  RFC9828Packetizer::Colorspace{
-							  /*colorspace_set=*/true,
-							  static_cast<uint8_t>(options->Get().rtp_prims),
-							  static_cast<uint8_t>(options->Get().rtp_trans),
-							  static_cast<uint8_t>(options->Get().rtp_mat),
-							  options->Get().rtp_range })
+		  rtp_packetizer_(
+			  options->Get().rtp_host, options->Get().rtp_port,
+			  RFC9828Packetizer::Colorspace { /*colorspace_set=*/true, static_cast<uint8_t>(options->Get().rtp_prims),
+											  static_cast<uint8_t>(options->Get().rtp_trans),
+											  static_cast<uint8_t>(options->Get().rtp_mat), options->Get().rtp_range })
 	{
 		tcp_connected_ = (tcp_socket_.create_client() >= 0);
 		if (!tcp_connected_)
 			LOG(1, "HT_Encoder: TCP connect to 133.36.41.118:4001 failed; will retry per frame");
 		if (!rtp_packetizer_.is_open())
-			LOG(1, "HT_Encoder: RTP UDP socket open failed for "
-					   << options->Get().rtp_host << ":" << options->Get().rtp_port);
+			LOG(1, "HT_Encoder: RTP UDP socket open failed for " << options->Get().rtp_host << ":"
+																 << options->Get().rtp_port);
 		else
-			LOG(2, "HT_Encoder: RTP fan-out -> " << options->Get().rtp_host << ":"
-												 << options->Get().rtp_port);
+			LOG(2, "HT_Encoder: RTP fan-out -> " << options->Get().rtp_host << ":" << options->Get().rtp_port);
 		output_thread_ = std::thread(&HT_Encoder::outputThread, this);
 		for (int i = 0; i < NUM_ENC_THREADS; i++)
 			encode_thread_[i] = std::thread(std::bind(&HT_Encoder::encodeThread, this, i));

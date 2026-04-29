@@ -29,7 +29,10 @@ public:
 		setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 	}
 
-	~simple_udp_client() { destroy(); }
+	~simple_udp_client()
+	{
+		destroy();
+	}
 
 	void destroy()
 	{
@@ -40,14 +43,16 @@ public:
 		}
 	}
 
-	bool is_open() const { return sockfd >= 0; }
+	bool is_open() const
+	{
+		return sockfd >= 0;
+	}
 
 	bool sendto_one(const uint8_t *data, size_t len)
 	{
 		if (sockfd < 0)
 			return false;
-		ssize_t n = sendto(sockfd, data, len, 0, reinterpret_cast<sockaddr *>(&dst_addr),
-						   sizeof(dst_addr));
+		ssize_t n = sendto(sockfd, data, len, 0, reinterpret_cast<sockaddr *>(&dst_addr), sizeof(dst_addr));
 		return n == static_cast<ssize_t>(len);
 	}
 };
