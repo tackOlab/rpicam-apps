@@ -50,7 +50,9 @@ public:
 private:
 	struct Buffer
 	{
-		Buffer() : fd(-1) {}
+		Buffer() : fd(-1)
+		{
+		}
 		int fd;
 		size_t size;
 		StreamInfo info;
@@ -182,10 +184,10 @@ EglPreview::EglPreview(Options const *options) : Preview(options), last_fd_(-1),
 	if (!eglInitialize(egl_display_, &egl_major, &egl_minor))
 		throw std::runtime_error("eglInitialize() failed");
 
-	x_ = options_->preview_x;
-	y_ = options_->preview_y;
-	width_ = options_->preview_width;
-	height_ = options_->preview_height;
+	x_ = options_->Get().preview_x;
+	y_ = options_->Get().preview_y;
+	width_ = options_->Get().preview_width;
+	height_ = options_->Get().preview_height;
 	makeWindow("rpicam-app");
 
 	// gl_setup() has to happen later, once we're sure we're in the display thread.
@@ -255,21 +257,16 @@ void EglPreview::makeWindow(char const *name)
 		height_ = 768;
 	}
 
-	if (options_->fullscreen || x_ + width_ > screen_width || y_ + height_ > screen_height)
+	if (options_->Get().fullscreen || x_ + width_ > screen_width || y_ + height_ > screen_height)
 	{
 		x_ = y_ = 0;
 		width_ = DisplayWidth(display_, screen_num);
 		height_ = DisplayHeight(display_, screen_num);
 	}
 
-	static const EGLint attribs[] =
-		{
-			EGL_RED_SIZE, 1,
-			EGL_GREEN_SIZE, 1,
-			EGL_BLUE_SIZE, 1,
-			EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-			EGL_NONE
-		};
+	static const EGLint attribs[] = { EGL_RED_SIZE,	 1, EGL_GREEN_SIZE,		 1,
+									  EGL_BLUE_SIZE, 1, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+									  EGL_NONE };
 	EGLConfig config;
 	EGLint num_configs;
 	if (!eglChooseConfig(egl_display_, attribs, &config, 1, &num_configs))
@@ -295,7 +292,7 @@ void EglPreview::makeWindow(char const *name)
 	window_ = XCreateWindow(display_, root, x_, y_, width_, height_, 0, visinfo->depth, InputOutput, visinfo->visual,
 							mask, &attr);
 
-	if (options_->fullscreen)
+	if (options_->Get().fullscreen)
 		no_border(display_, window_);
 
 	/* set hints and properties */
@@ -312,10 +309,7 @@ void EglPreview::makeWindow(char const *name)
 
 	eglBindAPI(EGL_OPENGL_ES_API);
 
-	static const EGLint ctx_attribs[] = {
-		EGL_CONTEXT_CLIENT_VERSION, 2,
-		EGL_NONE
-	};
+	static const EGLint ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
 	egl_context_ = eglCreateContext(egl_display_, config, EGL_NO_CONTEXT, ctx_attribs);
 	if (!egl_context_)
 		throw std::runtime_error("eglCreateContext failed");
@@ -375,23 +369,35 @@ void EglPreview::makeBuffer(int fd, size_t size, StreamInfo const &info, Buffer 
 	EGLint encoding, range;
 	get_colour_space_info(info.colour_space, encoding, range);
 
-	EGLint attribs[] = {
-		EGL_WIDTH, static_cast<EGLint>(info.width),
-		EGL_HEIGHT, static_cast<EGLint>(info.height),
-		EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_YUV420,
-		EGL_DMA_BUF_PLANE0_FD_EXT, fd,
-		EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-		EGL_DMA_BUF_PLANE0_PITCH_EXT, static_cast<EGLint>(info.stride),
-		EGL_DMA_BUF_PLANE1_FD_EXT, fd,
-		EGL_DMA_BUF_PLANE1_OFFSET_EXT, static_cast<EGLint>(info.stride * info.height),
-		EGL_DMA_BUF_PLANE1_PITCH_EXT, static_cast<EGLint>(info.stride / 2),
-		EGL_DMA_BUF_PLANE2_FD_EXT, fd,
-		EGL_DMA_BUF_PLANE2_OFFSET_EXT, static_cast<EGLint>(info.stride * info.height + (info.stride / 2) * (info.height / 2)),
-		EGL_DMA_BUF_PLANE2_PITCH_EXT, static_cast<EGLint>(info.stride / 2),
-		EGL_YUV_COLOR_SPACE_HINT_EXT, encoding,
-		EGL_SAMPLE_RANGE_HINT_EXT, range,
-		EGL_NONE
-	};
+	EGLint attribs[] = { EGL_WIDTH,
+						 static_cast<EGLint>(info.width),
+						 EGL_HEIGHT,
+						 static_cast<EGLint>(info.height),
+						 EGL_LINUX_DRM_FOURCC_EXT,
+						 DRM_FORMAT_YUV420,
+						 EGL_DMA_BUF_PLANE0_FD_EXT,
+						 fd,
+						 EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+						 0,
+						 EGL_DMA_BUF_PLANE0_PITCH_EXT,
+						 static_cast<EGLint>(info.stride),
+						 EGL_DMA_BUF_PLANE1_FD_EXT,
+						 fd,
+						 EGL_DMA_BUF_PLANE1_OFFSET_EXT,
+						 static_cast<EGLint>(info.stride * info.height),
+						 EGL_DMA_BUF_PLANE1_PITCH_EXT,
+						 static_cast<EGLint>(info.stride / 2),
+						 EGL_DMA_BUF_PLANE2_FD_EXT,
+						 fd,
+						 EGL_DMA_BUF_PLANE2_OFFSET_EXT,
+						 static_cast<EGLint>(info.stride * info.height + (info.stride / 2) * (info.height / 2)),
+						 EGL_DMA_BUF_PLANE2_PITCH_EXT,
+						 static_cast<EGLint>(info.stride / 2),
+						 EGL_YUV_COLOR_SPACE_HINT_EXT,
+						 encoding,
+						 EGL_SAMPLE_RANGE_HINT_EXT,
+						 range,
+						 EGL_NONE };
 
 	EGLImage image = eglCreateImageKHR(egl_display_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
 	if (!image)
@@ -450,7 +456,9 @@ bool EglPreview::Quit()
 	return false;
 }
 
-Preview *make_egl_preview(Options const *options)
+static Preview *Create(Options const *options)
 {
 	return new EglPreview(options);
 }
+
+static RegisterPreview reg("egl", &Create);

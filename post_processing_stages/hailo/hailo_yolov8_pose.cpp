@@ -24,7 +24,7 @@
 
 using Rectangle = libcamera::Rectangle;
 using Size = libcamera::Size;
-using PostProcFuncPtr = std::pair<std::vector<KeyPt>, std::vector<PairPairs>>(*)(HailoROIPtr);
+using PostProcFuncPtr = std::pair<std::vector<KeyPt>, std::vector<PairPairs>> (*)(HailoROIPtr);
 
 #define NAME "hailo_yolo_pose"
 #define POSTPROC_LIB "libyolov8pose_post.so"
@@ -45,11 +45,10 @@ public:
 private:
 	void runInference(const uint8_t *input, uint32_t *output, const std::vector<Rectangle> &scaler_crops);
 
-	PostProcessingLib postproc_;
+	DlLib postproc_;
 };
 
-YoloPose::YoloPose(RPiCamApp *app)
-	: HailoPostProcessingStage(app), postproc_(PostProcLibDir(POSTPROC_LIB))
+YoloPose::YoloPose(RPiCamApp *app) : HailoPostProcessingStage(app), postproc_(PostProcLibDir(POSTPROC_LIB))
 {
 }
 

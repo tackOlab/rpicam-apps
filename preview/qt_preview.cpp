@@ -26,8 +26,11 @@
 class MyMainWindow : public QMainWindow
 {
 public:
-	MyMainWindow() : QMainWindow() {}
+	MyMainWindow() : QMainWindow()
+	{
+	}
 	bool quit = false;
+
 protected:
 	void closeEvent(QCloseEvent *event) override
 	{
@@ -46,13 +49,17 @@ public:
 	}
 	QSize size;
 	QImage image;
+
 protected:
 	void paintEvent(QPaintEvent *) override
 	{
 		QPainter painter(this);
 		painter.drawImage(rect(), image, image.rect());
 	}
-	QSize sizeHint() const override { return size; }
+	QSize sizeHint() const override
+	{
+		return size;
+	}
 };
 
 class QtPreview : public Preview
@@ -60,8 +67,8 @@ class QtPreview : public Preview
 public:
 	QtPreview(Options const *options) : Preview(options)
 	{
-		window_width_ = options->preview_width;
-		window_height_ = options->preview_height;
+		window_width_ = options->Get().preview_width;
+		window_height_ = options->Get().preview_height;
 		if (window_width_ % 2 || window_height_ % 2)
 			throw std::runtime_error("QtPreview: expect even dimensions");
 		// This preview window is expensive, so make it small by default.
@@ -80,7 +87,10 @@ public:
 		application_->exit();
 		thread_.join();
 	}
-	void SetInfoText(const std::string &text) override { main_window_->setWindowTitle(QString::fromStdString(text)); }
+	void SetInfoText(const std::string &text) override
+	{
+		main_window_->setWindowTitle(QString::fromStdString(text));
+	}
 	virtual void Show(int fd, libcamera::Span<uint8_t> span, StreamInfo const &info) override
 	{
 		// Quick and simple nearest-neighbour-ish resampling is used here.
@@ -91,7 +101,7 @@ public:
 
 		// Choose the right matrix to convert YUV back to RGB.
 		static const float YUV2RGB[3][9] = {
-			{ 1.0,   0.0, 1.402, 1.0,   -0.344, -0.714, 1.0,   1.772, 0.0 }, // JPEG
+			{ 1.0, 0.0, 1.402, 1.0, -0.344, -0.714, 1.0, 1.772, 0.0 }, // JPEG
 			{ 1.164, 0.0, 1.596, 1.164, -0.392, -0.813, 1.164, 2.017, 0.0 }, // SMPTE170M
 			{ 1.164, 0.0, 1.793, 1.164, -0.213, -0.533, 1.164, 2.112, 0.0 }, // Rec709
 		};
@@ -183,11 +193,19 @@ public:
 	}
 	// Reset the preview window, clearing the current buffers and being ready to
 	// show new ones.
-	void Reset() override {}
+	void Reset() override
+	{
+	}
 	// Check if preview window has been shut down.
-	bool Quit() override { return main_window_->quit; }
+	bool Quit() override
+	{
+		return main_window_->quit;
+	}
 	// There is no particular limit to image sizes, though large images will be very slow.
-	virtual void MaxImageSize(unsigned int &w, unsigned int &h) const override { w = h = 0; }
+	virtual void MaxImageSize(unsigned int &w, unsigned int &h) const override
+	{
+		w = h = 0;
+	}
 
 private:
 	void threadFunc(Options const *options)
@@ -204,7 +222,7 @@ private:
 		MyWidget pane(&main_window, window_width_, window_height_);
 		main_window.setCentralWidget(&pane);
 		// Need to get the window border sizes (it seems to be unreasonably difficult...)
-		main_window.move(options->preview_x + 2, options->preview_y + 28);
+		main_window.move(options->Get().preview_x + 2, options->Get().preview_y + 28);
 		main_window.show();
 		pane_ = &pane;
 		cond_var_.notify_one();
@@ -220,7 +238,9 @@ private:
 	std::vector<uint8_t> tmp_stripe_;
 };
 
-Preview *make_qt_preview(Options const *options)
+static Preview *Create(Options const *options)
 {
 	return new QtPreview(options);
 }
+
+static RegisterPreview reg("qt", &Create);

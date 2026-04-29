@@ -28,6 +28,10 @@ extern "C"
 #include "libavutil/timestamp.h"
 #include "libavutil/version.h"
 #include "libswresample/swresample.h"
+
+#if LIBAVCODEC_VERSION_MAJOR < 61
+#error "Error: libavcodec API version is too old for the libav encoder!"
+#endif
 }
 
 #include "encoder.hpp"
@@ -58,7 +62,6 @@ private:
 	bool abort_video_;
 	bool abort_audio_;
 	uint64_t video_start_ts_;
-	uint64_t audio_samples_;
 
 	std::queue<AVFrame *> frame_queue_;
 	std::mutex video_mutex_;
@@ -68,7 +71,12 @@ private:
 	std::thread audio_thread_;
 
 	// The ordering in the enum below must not change!
-	enum Context { Video = 0, AudioOut = 1, AudioIn = 2 };
+	enum Context
+	{
+		Video = 0,
+		AudioOut = 1,
+		AudioIn = 2
+	};
 	AVCodecContext *codec_ctx_[3];
 	AVStream *stream_[3];
 	AVFormatContext *in_fmt_ctx_;
@@ -79,4 +87,5 @@ private:
 
 	std::string output_file_;
 	bool output_initialised_;
+	bool elementary_stream_;
 };

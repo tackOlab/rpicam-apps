@@ -7,8 +7,8 @@
 
 #include <chrono>
 
-#include "core/rpicam_app.hpp"
 #include "core/options.hpp"
+#include "core/rpicam_app.hpp"
 #include "post_processing_stages/object_detect.hpp"
 #include "subprojects/kakadujs/src/HTJ2KEncoder.hpp"
 
@@ -17,7 +17,6 @@
 #include "opencv2/imgproc.hpp"
 
 #include "encoder/ht_encoder.hpp"
-
 
 using namespace std::placeholders;
 
@@ -34,8 +33,8 @@ static void event_loop(RPiCamApp &app)
 	
 	// Setup HTJ2K encoder
 	std::vector<uint8_t> encbuf; // codestream buffer
-  	encbuf.reserve(options->viewfinder_width * options->viewfinder_height * 3);
-  	const FrameInfo finfo = {static_cast<uint16_t>(options->viewfinder_width), static_cast<uint16_t>(options->viewfinder_height), 8, 3, false};
+  	encbuf.reserve(options->Get().viewfinder_width * options->Get().viewfinder_height * 3);
+  	const FrameInfo finfo = {static_cast<uint16_t>(options->Get().viewfinder_width), static_cast<uint16_t>(options->Get().viewfinder_height), 8, 3, false};
 	// HTJ2KEncoder encoder(encbuf, finfo); // encoder instance
 	HT_Encoder htenc(encbuf, finfo, options);
 
@@ -46,7 +45,7 @@ static void event_loop(RPiCamApp &app)
 	auto start_time = std::chrono::high_resolution_clock::now();
 	std::mutex m;
 	auto lk = std::unique_lock<std::mutex>(m, std::defer_lock);
-	for (unsigned int count = 0; ; count++)
+	for (unsigned int count = 0;; count++)
 	{
 		RPiCamApp::Msg msg = app.Wait();
 		if (msg.type == RPiCamApp::MsgType::Timeout)
@@ -63,7 +62,7 @@ static void event_loop(RPiCamApp &app)
 
 		LOG(2, "Viewfinder frame " << count);
 		auto now = std::chrono::high_resolution_clock::now();
-		if (options->timeout && (now - start_time) > options->timeout.value)
+		if (options->Get().timeout && (now - start_time) > options->Get().timeout.value)
 			return;
 
 		CompletedRequestPtr &completed_request = std::get<CompletedRequestPtr>(msg.payload);
@@ -78,7 +77,7 @@ static void event_loop(RPiCamApp &app)
 		cv::Mat frame;
 		{
 			// std::unique_lock<std::mutex> lock(m);
-			frame = cv::Mat(options->viewfinder_height * 1.5, options->viewfinder_width, CV_8UC1, (uint32_t *)ptr);
+			frame = cv::Mat(options->Get().viewfinder_height * 1.5, options->Get().viewfinder_width, CV_8UC1, (uint32_t *)ptr);
 		}
 		cv::Mat out;
 		cv::cvtColor(frame, out, cv::COLOR_YUV2RGB_I420);
@@ -118,8 +117,8 @@ int main(int argc, char *argv[])
 		Options *options = app.GetOptions();
 		if (options->Parse(argc, argv))
 		{
-			if (options->verbose >= 2)
-				options->Print();
+			if (options->Get().verbose >= 2)
+				options->Get().Print();
 
 			event_loop(app);
 		}

@@ -17,9 +17,10 @@
 
 #include <libcamera/geometry.h>
 
-#include <hailo/hailort.hpp>
 #include "hailo_objects.hpp"
+#include <hailo/hailort.hpp>
 
+#include "core/dl_lib.hpp"
 #include "core/rpicam_app.hpp"
 #include "post_processing_stages/post_processing_stage.hpp"
 
@@ -40,8 +41,7 @@ private:
 
 	struct AllocInfo
 	{
-		AllocInfo(uint8_t *_ptr, unsigned int _size, bool _free)
-			: ptr(_ptr), size(_size), free(_free)
+		AllocInfo(uint8_t *_ptr, unsigned int _size, bool _free) : ptr(_ptr), size(_size), free(_free)
 		{
 		}
 
@@ -95,7 +95,9 @@ using RgbImagePtr = std::shared_ptr<uint8_t>;
 
 struct Msg
 {
-	Msg(MsgType const &t) : type(t) {}
+	Msg(MsgType const &t) : type(t)
+	{
+	}
 	template <typename T>
 	Msg(MsgType const &t, T p, const libcamera::Size &sz, const std::string &title)
 		: type(t), payload(std::forward<T>(p)), size(sz), window_title(title)
@@ -137,6 +139,7 @@ public:
 								 [&display](const Msg &m) { return m.window_title == display; });
 		queue_.erase(it, queue_.end());
 	}
+
 private:
 	std::deque<Msg> queue_;
 	std::mutex mutex_;
@@ -194,9 +197,8 @@ private:
 
 	std::mutex lock_;
 	bool init_ = false;
-	std::string hef_file_, hef_file_8_, hef_file_8L_;
+	std::string hef_file_, hef_file_8_, hef_file_8L_, hef_file_10_;
 	hailort::ConfiguredInferModel::Bindings bindings_;
 	std::chrono::time_point<std::chrono::steady_clock> last_frame_;
 	libcamera::Size input_tensor_size_;
-	hailo_device_identity_t device_id_;
 };

@@ -284,8 +284,8 @@ target_link_libraries(kakaduappsupport PUBLIC kakadu)
 
 # turn off specific compiler warnings depending upon the compiler
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(kakadu PRIVATE -Wno-return-type -Wno-volatile -Wno-deprecated-declarations)
-    target_compile_options(kakaduappsupport PRIVATE -Wno-return-type -Wno-volatile -Wno-deprecated-declarations)
+    target_compile_options(kakadu PRIVATE -Wno-error -Wno-return-type -Wno-volatile -Wno-deprecated-declarations -Wno-unused-parameter)
+    target_compile_options(kakaduappsupport PRIVATE -Wno-error -Wno-return-type -Wno-volatile -Wno-deprecated-declarations -Wno-unused-parameter)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(kakadu PRIVATE -Wno-deprecated-volatile -Wno-return-type)
     target_compile_options(kakaduappsupport PRIVATE -Wno-deprecated-volatile -Wno-return-type)

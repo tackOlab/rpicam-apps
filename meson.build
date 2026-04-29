@@ -1,16 +1,14 @@
 project('rpicam-apps', 'c', 'cpp',
         meson_version : '>= 0.64.0',
-        version : '1.7.0',
+        version : '1.11.1',
         default_options : [
-            'werror=false',
-            # 'warning_level=3',
-            'cpp_std=c++17',
+            'werror=true',
+            'warning_level=3',
+            'cpp_std=c++20',
             'c_std=c11',
             'buildtype=release',
         ],
         license : 'BSD-2-Clause')
-
-meson.add_dist_script('utils' / 'gen-dist.sh')
 
 fs = import('fs')
 
@@ -37,6 +35,12 @@ endif
 dl_dep = dependency('dl', required : true)
 libcamera_dep = dependency('libcamera', required : true)
 
+if get_option('disable_rpi_features') == true
+    cpp_arguments += '-DDISABLE_RPI_FEATURES'
+endif
+
+add_project_arguments(cpp_arguments, language : 'cpp')
+
 summary({
             'location' : libcamera_dep.get_variable('libdir'),
             'version' : libcamera_dep.version()
@@ -46,34 +50,26 @@ summary({
 rpicam_app_src = []
 rpicam_app_dep = [libcamera_dep, dl_dep]
 
+conf_data = configuration_data()
+
 subdir('core')
 subdir('encoder')
 subdir('image')
 subdir('output')
+subdir('post_processing_stages')
 subdir('preview')
 subdir('utils')
 
-add_project_arguments(cpp_arguments, language : 'cpp')
+configure_file(output : 'config.h', configuration : conf_data)
+
+# CMake subproject: kakadujs (HTJ2K encoder used by rpicam-hello).
 cmake = import('cmake')
-
-# Configure the CMake project
 sub_proj = cmake.subproject('kakadujs')
-
-# Fetch the dependency object
 kakadu_lib = sub_proj.dependency('kakadu')
 kakaduapp_lib = sub_proj.dependency('kakaduappsupport')
-# Must be put after add_project_arguments as it defines shared library targets.
-subdir('post_processing_stages')
 
 # Generate a version string.
 version_cmd = [meson.project_source_root() / 'utils' / 'version.py', meson.project_version()]
-
-# Check if a version.gen file is present.
-# This would have been generated from the meson dist command.
-dist_version_file = meson.project_source_root() / 'version.gen'
-if fs.is_file(dist_version_file)
-    version_cmd += fs.read(dist_version_file)
-endif
 
 version_cpp = vcs_tag(command : version_cmd,
                       replace_string: '@VER@',
@@ -86,21 +82,15 @@ rpicam_app_src += version_cpp
 rpicam_app = library(
     'rpicam_app',
     rpicam_app_src,
-    soversion : meson.project_version(),
+    version : meson.project_version(),
     include_directories : include_directories('.'),
     install : true,
-    name_prefix : '',
     dependencies : rpicam_app_dep,
 )
 
 pkg = import('pkgconfig')
 pkg.generate(rpicam_app,
              version: meson.project_version())
-
-# Install a symlink to the old library name for legacy purposes.
-install_symlink('libcamera_app.so',
-                install_dir: get_option('libdir'),
-                pointing_to: 'rpicam_app.so')
 
 subdir('apps')
 

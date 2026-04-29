@@ -60,11 +60,14 @@ struct ExifException
 
 // libexif knows the formats of many tags, but not all (I mean, why not?!?).
 // Exceptions can be listed here.
+// clang-format off
 static std::map<ExifTag, ExifException> exif_exceptions =
 {
 	{ EXIF_TAG_YCBCR_COEFFICIENTS, { EXIF_FORMAT_RATIONAL, 3 } },
 };
+// clang-format on
 
+// clang-format off
 static std::map<std::string, ExifIfd> exif_ifd_map =
 {
 	{ "EXIF", EXIF_IFD_EXIF },
@@ -73,7 +76,9 @@ static std::map<std::string, ExifIfd> exif_ifd_map =
 	{ "EINT", EXIF_IFD_INTEROPERABILITY },
 	{ "GPS",  EXIF_IFD_GPS }
 };
+// clang-format on
 
+// clang-format off
 static ExifReadFunction const exif_read_functions[] =
 {
 	// Same order as ExifFormat enum.
@@ -89,7 +94,7 @@ static ExifReadFunction const exif_read_functions[] =
 	exif_read_slong,
 	exif_read_srational
 };
-
+// clang-format on
 
 int exif_read_short(char const *str, unsigned char *mem)
 {
@@ -253,9 +258,9 @@ void exif_read_tag(ExifData *exif, char const *str)
 	}
 }
 
-static void YUYV_to_JPEG(const uint8_t *input, StreamInfo const &info,
-						 const unsigned int output_width, const unsigned int output_height,
-						 const int quality, const unsigned int restart, uint8_t *&jpeg_buffer, jpeg_mem_len_t &jpeg_len)
+static void YUYV_to_JPEG(const uint8_t *input, StreamInfo const &info, const unsigned int output_width,
+						 const unsigned int output_height, const int quality, const unsigned int restart,
+						 uint8_t *&jpeg_buffer, jpeg_mem_len_t &jpeg_len)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -307,9 +312,8 @@ static void YUYV_to_JPEG(const uint8_t *input, StreamInfo const &info,
 	jpeg_destroy_compress(&cinfo);
 }
 
-static void YUV420_to_JPEG_fast(const uint8_t *input, StreamInfo const &info,
-								const int quality, const unsigned int restart,
-								uint8_t *&jpeg_buffer, jpeg_mem_len_t &jpeg_len)
+static void YUV420_to_JPEG_fast(const uint8_t *input, StreamInfo const &info, const int quality,
+								const unsigned int restart, uint8_t *&jpeg_buffer, jpeg_mem_len_t &jpeg_len)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -358,10 +362,9 @@ static void YUV420_to_JPEG_fast(const uint8_t *input, StreamInfo const &info,
 	jpeg_destroy_compress(&cinfo);
 }
 
-static void YUV420_to_JPEG(const uint8_t *input, StreamInfo const &info,
-						   const unsigned int output_width, const unsigned int output_height,
-						   const int quality, const unsigned int restart, uint8_t *&jpeg_buffer,
-						   jpeg_mem_len_t &jpeg_len)
+static void YUV420_to_JPEG(const uint8_t *input, StreamInfo const &info, const unsigned int output_width,
+						   const unsigned int output_height, const int quality, const unsigned int restart,
+						   uint8_t *&jpeg_buffer, jpeg_mem_len_t &jpeg_len)
 {
 	if (info.width == output_width && info.height == output_height)
 	{
@@ -498,22 +501,22 @@ static void create_exif_data(std::vector<libcamera::Span<uint8_t>> const &mem, S
 		}
 
 		// Command-line supplied tags.
-		for (auto &exif_item : options->exif)
+		for (auto &exif_item : options->Get().exif)
 		{
 			LOG(2, "Processing EXIF item: " << exif_item);
 			exif_read_tag(exif, exif_item.c_str());
 		}
 
-		if (options->thumb_quality)
+		if (options->Get().thumb_quality)
 		{
 			// Add some tags for the thumbnail. We put in dummy values for the thumbnail
 			// offset/length to occupy the right amount of space, and fill them in later.
 
-			LOG(2, "Thumbnail dimensions are " << options->thumb_width << " x " << options->thumb_height);
+			LOG(2, "Thumbnail dimensions are " << options->Get().thumb_width << " x " << options->Get().thumb_height);
 			entry = exif_create_tag(exif, EXIF_IFD_1, EXIF_TAG_IMAGE_WIDTH);
-			exif_set_short(entry->data, exif_byte_order, options->thumb_width);
+			exif_set_short(entry->data, exif_byte_order, options->Get().thumb_width);
 			entry = exif_create_tag(exif, EXIF_IFD_1, EXIF_TAG_IMAGE_LENGTH);
-			exif_set_short(entry->data, exif_byte_order, options->thumb_height);
+			exif_set_short(entry->data, exif_byte_order, options->Get().thumb_height);
 			entry = exif_create_tag(exif, EXIF_IFD_1, EXIF_TAG_COMPRESSION);
 			exif_set_short(entry->data, exif_byte_order, 6);
 			ExifEntry *thumb_offset_entry = exif_create_tag(exif, EXIF_IFD_1, EXIF_TAG_JPEG_INTERCHANGE_FORMAT);
@@ -531,11 +534,11 @@ static void create_exif_data(std::vector<libcamera::Span<uint8_t>> const &mem, S
 			// Next create the JPEG for the thumbnail, we need to do this now so that we can
 			// go back and fill in the correct values for the thumbnail offsets/length.
 
-			int q = options->thumb_quality;
+			int q = options->Get().thumb_quality;
 			for (; q > 0; q -= 5)
 			{
-				YUV_to_JPEG((uint8_t *)(mem[0].data()), info, options->thumb_width,
-							options->thumb_height, q, 0, thumb_buffer, thumb_len);
+				YUV_to_JPEG((uint8_t *)(mem[0].data()), info, options->Get().thumb_width, options->Get().thumb_height,
+							q, 0, thumb_buffer, thumb_len);
 				if (thumb_len < 60000) // entire EXIF data must be < 65536, so this should be safe
 					break;
 				free(thumb_buffer);
@@ -595,15 +598,15 @@ void jpeg_save(std::vector<libcamera::Span<uint8_t>> const &mem, StreamInfo cons
 		// YUV422 or YUV420 planar format).
 
 		jpeg_mem_len_t jpeg_len;
-		YUV_to_JPEG((uint8_t *)(mem[0].data()), info, info.width, info.height, options->quality, options->restart,
-					jpeg_buffer, jpeg_len);
+		YUV_to_JPEG((uint8_t *)(mem[0].data()), info, info.width, info.height, options->Get().quality,
+					options->Get().restart, jpeg_buffer, jpeg_len);
 		LOG(2, "JPEG size is " << jpeg_len);
 
 		// Write everything out.
 
 		fp = filename == "-" ? stdout : fopen(filename.c_str(), "w");
 		if (!fp)
-			throw std::runtime_error("failed to open file " + options->output);
+			throw std::runtime_error("failed to open file " + options->Get().output);
 
 		LOG(2, "EXIF data len " << exif_len);
 
