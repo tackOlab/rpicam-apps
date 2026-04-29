@@ -12,9 +12,7 @@
 #include "post_processing_stages/object_detect.hpp"
 #include "subprojects/kakadujs/src/HTJ2KEncoder.hpp"
 
-#include "opencv2/highgui.hpp"
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/imgproc.hpp"
+#include "opencv2/core.hpp"
 
 #include "encoder/ht_encoder.hpp"
 
@@ -40,11 +38,7 @@ static void event_loop(RPiCamApp &app)
 
 	app.StartCamera();
 
-	bool not_saved = true;
-
 	auto start_time = std::chrono::high_resolution_clock::now();
-	std::mutex m;
-	auto lk = std::unique_lock<std::mutex>(m, std::defer_lock);
 	for (unsigned int count = 0;; count++)
 	{
 		RPiCamApp::Msg msg = app.Wait();
@@ -66,46 +60,29 @@ static void event_loop(RPiCamApp &app)
 			return;
 
 		CompletedRequestPtr &completed_request = std::get<CompletedRequestPtr>(msg.payload);
-		// We commented out below because preview window only supports YUV420
 		app.ShowPreview(completed_request, app.ViewfinderStream());
-		
-		libcamera::Stream *stream = app.ViewfinderStream();	
-		BufferReadSync r(&app, completed_request->buffers[stream]);
-		libcamera::Span<uint8_t> buffer = r.Get()[0];
-		uint8_t *ptr = (uint8_t *)buffer.data();
-		
-		cv::Mat frame;
-		{
-			// std::unique_lock<std::mutex> lock(m);
-			frame = cv::Mat(options->Get().viewfinder_height * 1.5, options->Get().viewfinder_width, CV_8UC1, (uint32_t *)ptr);
-		}
-		cv::Mat out;
-		cv::cvtColor(frame, out, cv::COLOR_YUV2RGB_I420);
-		// cv::imshow("Dectention results", out);
-		auto info = app.GetStreamInfo(stream);
-		info.pixel_format = libcamera::formats::RGB888;
-		info.colour_space = libcamera::ColorSpace::Srgb;
-		info.width = out.cols;
-		info.height = out.rows;
-		info.stride = out.cols;
-		// cv::pollKey();
-		
+
 		std::vector<Detection> objects;
 		completed_request->post_process_metadata.Get("object_detect.results", objects);
-		if (objects.size()) {
-			for (auto &v : objects)
+		bool encode = false;
+		for (auto const &v : objects)
+		{
+			if (v.name == "person" && v.confidence > 0.75)
 			{
-				if (v.name == "person" && v.confidence > 0.75)
-				// cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
-				{
-					// std::scoped_lock lock(m);
-					int64_t t = 0;
-					// htenc.EncodeBuffer(completed_request->buffers[stream]->planes()[0].fd.get(), buffer.size(),buffer.data(), app.GetStreamInfo(stream), t);
-					// htenc.EncodeBuffer(1, out.cols * out.rows *3, out.data, info,t);
-					htenc.EncodeBuffer(1, frame.cols * frame.rows * 1.5, frame.data, info, t);
-				}
+				encode = true;
+				break;
 			}
 		}
+		if (!encode)
+			continue;
+
+		libcamera::Stream *stream = app.ViewfinderStream();
+		BufferReadSync r(&app, completed_request->buffers[stream]);
+		libcamera::Span<uint8_t> buffer = r.Get()[0];
+		const int w = options->Get().viewfinder_width;
+		const int h = options->Get().viewfinder_height;
+		cv::Mat frame(h * 3 / 2, w, CV_8UC1, buffer.data());
+		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), 0);
 	}
 }
 
