@@ -57,11 +57,13 @@ public:
 		output_thread_.join();
 		LOG(2, "HT_Encoder closed");
 	}
-	// Encode the given buffer.
-	void EncodeBuffer(int fd, size_t size, void *mem, StreamInfo const &info, int64_t timestamp_us)
+	// Encode the given buffer.  RTP fans out every frame; TCP archive only
+	// fires when archive_this_frame is true (caller's rate-limit decision).
+	void EncodeBuffer(int fd, size_t size, void *mem, StreamInfo const &info, int64_t timestamp_us,
+					  bool archive_this_frame = false)
 	{
 		std::lock_guard<std::mutex> lock(encode_mutex_);
-		EncodeItem item = { mem, info, timestamp_us, index_++ };
+		EncodeItem item = { mem, info, timestamp_us, index_++, archive_this_frame };
 		encode_queue_.push(item);
 		encode_cond_var_.notify_all();
 	}
@@ -75,6 +77,14 @@ private:
 	{
 		std::chrono::duration<double> encode_time(0);
 		uint32_t frames = 0;
+
+		// Once-per-second rolling-stats accumulators (avoid per-frame printf
+		// at 30+ fps, which is itself measurable on the Pi).
+		auto stats_window_start = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> stats_encode_total { 0 };
+		uint32_t stats_frames = 0;
+		uint64_t stats_bytes_total = 0;
+		uint32_t stats_archive_frames = 0;
 
 		EncodeItem encode_item;
 		while (true)
@@ -117,22 +127,8 @@ private:
 				// printf("\n");
 			}
 			encode_time = (std::chrono::high_resolution_clock::now() - start_time);
-			// Send codestream via persistent TCP connection, framed as [u32 BE length][N bytes].
-			// On failure, drop the socket and reconnect on the next frame.
-			if (!tcp_connected_)
-				tcp_connected_ = (tcp_socket_.create_client() >= 0);
-			if (tcp_connected_)
-			{
-				if (!tcp_socket_.SendFramed(buf.data(), static_cast<uint32_t>(buffer_len)))
-				{
-					LOG(1, "HT_Encoder: TCP send failed; reconnecting on next frame");
-					tcp_socket_.destroy();
-					tcp_connected_ = false;
-				}
-			}
 
-			// Also fan out via RFC 9828 RTP for live monitoring. Independent
-			// of TCP archive — failure here doesn't affect the TCP path.
+			// RTP fan-out: every encoded frame, for continuous live monitoring.
 			if (rtp_packetizer_.is_open())
 			{
 				// Camera timestamp is microseconds; RTP timestamp is 90 kHz ticks.
@@ -141,8 +137,50 @@ private:
 				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90))
 					LOG(1, "HT_Encoder: RTP send_codestream failed for frame " << encode_item.index);
 			}
-			printf("HT codestream size = %ld, time = %f\n", buffer_len, encode_time);
+
+			// TCP archive: only when caller flagged this frame (e.g. person-detected
+			// + rate-limited).  Uses the persistent length-framed send from stage 1;
+			// independent of the RTP path above.
+			if (encode_item.archive)
+			{
+				if (!tcp_connected_)
+					tcp_connected_ = (tcp_socket_.create_client() >= 0);
+				if (tcp_connected_)
+				{
+					if (!tcp_socket_.SendFramed(buf.data(), static_cast<uint32_t>(buffer_len)))
+					{
+						LOG(1, "HT_Encoder: TCP send failed; reconnecting on next frame");
+						tcp_socket_.destroy();
+						tcp_connected_ = false;
+					}
+				}
+				++stats_archive_frames;
+			}
+
+			// Per-frame line: only at verbose level 2.
+			LOG(2,
+				"HT codestream size=" << buffer_len << " bytes, encode_time=" << encode_time.count() * 1000.0 << " ms");
 			frames++;
+			stats_encode_total += encode_time;
+			++stats_frames;
+			stats_bytes_total += buffer_len;
+
+			// Once-per-second summary at default verbosity.
+			auto wall = std::chrono::high_resolution_clock::now();
+			auto window = std::chrono::duration<double>(wall - stats_window_start);
+			if (window.count() >= 1.0 && stats_frames > 0)
+			{
+				char line[160];
+				snprintf(line, sizeof(line), "%u fps, avg %.2f ms/frame, %.0f kbps, archived %u", stats_frames,
+						 stats_encode_total.count() * 1000.0 / stats_frames,
+						 (stats_bytes_total * 8.0 / 1000.0) / window.count(), stats_archive_frames);
+				LOG(1, "HT_Encoder: " << line);
+				stats_window_start = wall;
+				stats_encode_total = std::chrono::duration<double> { 0 };
+				stats_frames = 0;
+				stats_bytes_total = 0;
+				stats_archive_frames = 0;
+			}
 			// Don't return buffers until the output thread as that's where they're
 			// in order again.
 
@@ -212,6 +250,7 @@ private:
 		StreamInfo info;
 		int64_t timestamp_us;
 		uint64_t index;
+		bool archive;
 	};
 	std::queue<EncodeItem> encode_queue_;
 	std::mutex encode_mutex_;

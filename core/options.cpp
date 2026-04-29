@@ -251,6 +251,8 @@ Options::Options()
 			"H.273 MatrixCoefficients written to the RTP Main packet (default 5 = BT.470BG/BT.601 525)")
 		("rtp-range", value<bool>(&v_->rtp_range)->default_value(true)->implicit_value(true),
 			"RTP VideoFullRangeFlag (default true = full range; false = narrow/limited)")
+		("archive-min-interval-ms", value<int>(&v_->archive_min_interval_ms)->default_value(1000),
+			"Minimum spacing between TCP archive snapshots when a person is detected, in ms (default 1000)")
 		("nopreview,n", value<bool>(&v_->nopreview)->default_value(false)->implicit_value(true),
 			"Do not show a preview window")
 		("preview,p", value<std::string>(&v_->preview)->default_value("0,0,0,0"),

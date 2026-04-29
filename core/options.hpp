@@ -345,6 +345,9 @@ struct OptsInternal
 	int rtp_trans;
 	int rtp_mat;
 	bool rtp_range;
+	// Minimum spacing between TCP archive snapshots when person-detected.
+	// Independent of the RTP fan-out, which runs every encoded frame.
+	int archive_min_interval_ms;
 };
 
 struct Options
