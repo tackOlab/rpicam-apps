@@ -78,6 +78,14 @@ private:
 		std::chrono::duration<double> encode_time(0);
 		uint32_t frames = 0;
 
+		// Once-per-second rolling-stats accumulators (avoid per-frame printf
+		// at 30+ fps, which is itself measurable on the Pi).
+		auto stats_window_start = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> stats_encode_total { 0 };
+		uint32_t stats_frames = 0;
+		uint64_t stats_bytes_total = 0;
+		uint32_t stats_archive_frames = 0;
+
 		EncodeItem encode_item;
 		while (true)
 		{
@@ -146,9 +154,33 @@ private:
 						tcp_connected_ = false;
 					}
 				}
+				++stats_archive_frames;
 			}
-			printf("HT codestream size = %ld, time = %f\n", buffer_len, encode_time);
+
+			// Per-frame line: only at verbose level 2.
+			LOG(2,
+				"HT codestream size=" << buffer_len << " bytes, encode_time=" << encode_time.count() * 1000.0 << " ms");
 			frames++;
+			stats_encode_total += encode_time;
+			++stats_frames;
+			stats_bytes_total += buffer_len;
+
+			// Once-per-second summary at default verbosity.
+			auto wall = std::chrono::high_resolution_clock::now();
+			auto window = std::chrono::duration<double>(wall - stats_window_start);
+			if (window.count() >= 1.0 && stats_frames > 0)
+			{
+				char line[160];
+				snprintf(line, sizeof(line), "%u fps, avg %.2f ms/frame, %.0f kbps, archived %u", stats_frames,
+						 stats_encode_total.count() * 1000.0 / stats_frames,
+						 (stats_bytes_total * 8.0 / 1000.0) / window.count(), stats_archive_frames);
+				LOG(1, "HT_Encoder: " << line);
+				stats_window_start = wall;
+				stats_encode_total = std::chrono::duration<double> { 0 };
+				stats_frames = 0;
+				stats_bytes_total = 0;
+				stats_archive_frames = 0;
+			}
 			// Don't return buffers until the output thread as that's where they're
 			// in order again.
 

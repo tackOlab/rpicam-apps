@@ -47,8 +47,7 @@ static void event_loop(RPiCamApp &app)
 
 	app.StartCamera();
 
-	const int64_t archive_interval_us =
-		static_cast<int64_t>(options->Get().archive_min_interval_ms) * 1000;
+	const int64_t archive_interval_us = static_cast<int64_t>(options->Get().archive_min_interval_ms) * 1000;
 	int64_t last_archive_us = std::numeric_limits<int64_t>::min();
 
 	auto start_time = std::chrono::high_resolution_clock::now();
@@ -87,11 +86,8 @@ static void event_loop(RPiCamApp &app)
 			}
 		}
 
-		const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-									now.time_since_epoch())
-									.count();
-		const bool archive_this_frame =
-			person_detected && (now_us - last_archive_us >= archive_interval_us);
+		const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+		const bool archive_this_frame = person_detected && (now_us - last_archive_us >= archive_interval_us);
 		if (archive_this_frame)
 			last_archive_us = now_us;
 
@@ -101,8 +97,7 @@ static void event_loop(RPiCamApp &app)
 		const int w = options->Get().viewfinder_width;
 		const int h = options->Get().viewfinder_height;
 		cv::Mat frame(h * 3 / 2, w, CV_8UC1, buffer.data());
-		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), now_us,
-						   archive_this_frame);
+		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), now_us, archive_this_frame);
 	}
 }
 
