@@ -106,11 +106,19 @@ private:
 				// printf("\n");
 			}
 			encode_time = (std::chrono::high_resolution_clock::now() - start_time);
-			// send codestream via persistent TCP connection (retry connect if not yet up)
+			// Send codestream via persistent TCP connection, framed as [u32 BE length][N bytes].
+			// On failure, drop the socket and reconnect on the next frame.
 			if (!tcp_connected_)
 				tcp_connected_ = (tcp_socket_.create_client() >= 0);
 			if (tcp_connected_)
-				tcp_socket_.Tx(buf.data(), buffer_len);
+			{
+				if (!tcp_socket_.SendFramed(buf.data(), static_cast<uint32_t>(buffer_len)))
+				{
+					LOG(1, "HT_Encoder: TCP send failed; reconnecting on next frame");
+					tcp_socket_.destroy();
+					tcp_connected_ = false;
+				}
+			}
 			printf("HT codestream size = %ld, time = %f\n", buffer_len, encode_time);
 			frames++;
 			// Don't return buffers until the output thread as that's where they're
