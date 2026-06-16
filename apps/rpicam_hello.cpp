@@ -6,6 +6,9 @@
  */
 
 #include <chrono>
+#include <time.h>
+
+#include <libcamera/control_ids.h>
 
 #include "core/options.hpp"
 #include "core/rpicam_app.hpp"
@@ -28,6 +31,16 @@ enum progression
 };
 
 // The main event loop for the application.
+
+// Fixed offset (ns) to convert the libcamera SensorTimestamp (CLOCK_BOOTTIME)
+// into CLOCK_REALTIME (UNIX epoch).  Sampled once at startup; both clocks tick
+// at the same rate, so a single offset is sufficient for g2g timestamping.
+static const int64_t kClkOffNs = [] {
+	struct timespec rt, bt;
+	clock_gettime(CLOCK_REALTIME, &rt);
+	clock_gettime(CLOCK_BOOTTIME, &bt);
+	return (int64_t)rt.tv_sec * 1000000000LL + rt.tv_nsec - ((int64_t)bt.tv_sec * 1000000000LL + bt.tv_nsec);
+}();
 
 static void event_loop(RPiCamApp &app)
 {
@@ -92,13 +105,31 @@ static void event_loop(RPiCamApp &app)
 		if (archive_this_frame)
 			last_archive_us = now_us;
 
+		// Absolute capture wall-clock time (UNIX epoch ns) for g2g latency.
+		// SensorTimestamp is the capture instant on CLOCK_BOOTTIME; shift it to
+		// CLOCK_REALTIME.  Fall back to "now" if the sensor doesn't report it.
+		int64_t sensor_ns = 0;
+		if (auto t = completed_request->metadata.get(libcamera::controls::SensorTimestamp))
+			sensor_ns = *t; // CLOCK_BOOTTIME ns
+		int64_t capture_realtime_ns;
+		if (sensor_ns != 0)
+			capture_realtime_ns = sensor_ns + kClkOffNs; // UNIX epoch ns
+		else
+		{
+			struct timespec rt;
+			clock_gettime(CLOCK_REALTIME, &rt);
+			capture_realtime_ns = (int64_t)rt.tv_sec * 1000000000LL + rt.tv_nsec;
+			LOG(1, "rpicam-hello: SensorTimestamp unavailable; using CLOCK_REALTIME at loop time for capture_ns");
+		}
+
 		libcamera::Stream *stream = app.ViewfinderStream();
 		BufferReadSync r(&app, completed_request->buffers[stream]);
 		libcamera::Span<uint8_t> buffer = r.Get()[0];
 		const int w = options->Get().viewfinder_width;
 		const int h = options->Get().viewfinder_height;
 		cv::Mat frame(h * 3 / 2, w, CV_8UC1, buffer.data());
-		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), now_us, archive_this_frame);
+		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), now_us, archive_this_frame,
+						   capture_realtime_ns);
 	}
 }
 

@@ -60,10 +60,10 @@ public:
 	// Encode the given buffer.  RTP fans out every frame; TCP archive only
 	// fires when archive_this_frame is true (caller's rate-limit decision).
 	void EncodeBuffer(int fd, size_t size, void *mem, StreamInfo const &info, int64_t timestamp_us,
-					  bool archive_this_frame = false)
+					  bool archive_this_frame = false, int64_t capture_ns = 0)
 	{
 		std::lock_guard<std::mutex> lock(encode_mutex_);
-		EncodeItem item = { mem, info, timestamp_us, index_++, archive_this_frame };
+		EncodeItem item = { mem, info, timestamp_us, index_++, archive_this_frame, capture_ns };
 		encode_queue_.push(item);
 		encode_cond_var_.notify_all();
 	}
@@ -134,7 +134,8 @@ private:
 				// Camera timestamp is microseconds; RTP timestamp is 90 kHz ticks.
 				// us * 9 / 100 = us * 90 / 1000 with less overflow risk on int64.
 				const uint32_t ts90 = static_cast<uint32_t>(encode_item.timestamp_us * 9 / 100);
-				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90))
+				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90,
+													 (uint64_t)encode_item.capture_ns))
 					LOG(1, "HT_Encoder: RTP send_codestream failed for frame " << encode_item.index);
 			}
 
@@ -251,6 +252,7 @@ private:
 		int64_t timestamp_us;
 		uint64_t index;
 		bool archive;
+		int64_t capture_ns; // absolute capture wall-clock time (UNIX epoch ns)
 	};
 	std::queue<EncodeItem> encode_queue_;
 	std::mutex encode_mutex_;
