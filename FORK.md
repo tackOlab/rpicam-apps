@@ -80,6 +80,10 @@ cd build/apps && ./rpicam-hello -c ../../run-config.txt
 
 There is no test suite; verification is done by running the binary against a live camera.
 
+### Compatibility
+
+- Builds clean against **libcamera 0.7.1** (`v0.7.1+rpt20260609`), verified 2026-06-17 — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.7`. No source changes were required.
+
 ## Prerequisites
 
 System packages must be present at meson configure time:
