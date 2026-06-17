@@ -42,6 +42,11 @@ public:
 	static constexpr uint8_t RTP_PT = 96;
 	static constexpr uint32_t RTP_SSRC = 0xCAFEBABEu;
 
+	// RFC 8285 one-byte header extension carrying the absolute capture wall-clock
+	// time (UNIX epoch ns, big-endian).  ID=1, len=8 bytes.
+	static constexpr uint8_t CAPTURE_TS_ID = 1;
+	static constexpr size_t RTP_EXT_BYTES = 16; // 4-byte ext header + 8-byte ns + 3 pad + 1 element hdr -> 16 total
+
 	// Conservative payload budget. Standard Ethernet MTU is 1500; subtracting
 	// 20 (IPv4) + 8 (UDP) leaves 1472. Use 1300 to stay safe under VPN/tunnel
 	// encapsulation and avoid IP fragmentation.
@@ -75,10 +80,12 @@ public:
 	// Packetize and send one HTJ2K codestream as 1+N RTP datagrams.
 	// `timestamp90` is the per-frame 32-bit RTP timestamp (90 kHz); the same
 	// value is written into every packet of this frame.
-	bool send_codestream(const uint8_t *cs, size_t cs_len, uint32_t timestamp90)
+	bool send_codestream(const uint8_t *cs, size_t cs_len, uint32_t timestamp90, uint64_t capture_ns)
 	{
 		if (!sock_.is_open() || cs == nullptr || cs_len == 0)
 			return false;
+
+		capture_ns_ = capture_ns; // written into the header extension of every packet of this frame
 
 		constexpr size_t MAIN_MAX = TARGET_DATAGRAM_BYTES - RTP_HEADER_BYTES - MAIN_HEADER_BYTES;
 		constexpr size_t BODY_MAX = TARGET_DATAGRAM_BYTES - RTP_HEADER_BYTES - BODY_HEADER_BYTES;
@@ -107,7 +114,7 @@ private:
 	bool send_main_packet(const uint8_t *cs_chunk, size_t chunk_len, uint8_t mh, uint32_t ts, bool marker)
 	{
 		std::vector<uint8_t> dg;
-		dg.reserve(RTP_HEADER_BYTES + MAIN_HEADER_BYTES + chunk_len);
+		dg.reserve(RTP_HEADER_BYTES + RTP_EXT_BYTES + MAIN_HEADER_BYTES + chunk_len);
 		write_rtp_header(dg, marker, ts);
 
 		// Byte 0: MH(2) | TP(3)=0 | ORDH(3)
@@ -145,7 +152,7 @@ private:
 	bool send_body_packet(const uint8_t *cs_chunk, size_t chunk_len, uint32_t ts, bool marker)
 	{
 		std::vector<uint8_t> dg;
-		dg.reserve(RTP_HEADER_BYTES + BODY_HEADER_BYTES + chunk_len);
+		dg.reserve(RTP_HEADER_BYTES + RTP_EXT_BYTES + BODY_HEADER_BYTES + chunk_len);
 		write_rtp_header(dg, marker, ts);
 
 		// Byte 0: MH(2)=0 | TP(3)=0 | RES(3)=0
@@ -168,8 +175,8 @@ private:
 
 	void write_rtp_header(std::vector<uint8_t> &dg, bool marker, uint32_t ts)
 	{
-		// Byte 0: V=2 P=0 X=0 CC=0
-		dg.push_back(0x80);
+		// Byte 0: V=2 P=0 X=1 CC=0  (X=1: a header extension follows)
+		dg.push_back(0x90);
 		// Byte 1: M | PT
 		dg.push_back(static_cast<uint8_t>((marker ? 0x80 : 0x00) | (RTP_PT & 0x7F)));
 		// Bytes 2-3: sequence (BE)
@@ -186,10 +193,27 @@ private:
 		dg.push_back(static_cast<uint8_t>((RTP_SSRC >> 8) & 0xFF));
 		dg.push_back(static_cast<uint8_t>(RTP_SSRC & 0xFF));
 		++seq_;
+
+		// RFC 8285 one-byte header extension: absolute capture time (ns, BE).
+		// profile 0xBEDE, length 3 words (12 bytes of extension data).
+		dg.push_back(0xBE);
+		dg.push_back(0xDE);
+		dg.push_back(0x00);
+		dg.push_back(0x03);
+		// element header: (ID<<4) | (len-1); ID=1, len=8 -> 0x17
+		dg.push_back(static_cast<uint8_t>((CAPTURE_TS_ID << 4) | 0x07));
+		// 8 bytes: capture_ns big-endian
+		for (int s = 56; s >= 0; s -= 8)
+			dg.push_back(static_cast<uint8_t>((capture_ns_ >> s) & 0xFF));
+		// 3 bytes zero padding (9 -> 12 bytes of extension data)
+		dg.push_back(0x00);
+		dg.push_back(0x00);
+		dg.push_back(0x00);
 	}
 
 	simple_udp_client sock_;
 	uint16_t seq_;
 	uint8_t ordh_;
 	Colorspace cs_;
+	uint64_t capture_ns_ = 0;
 };

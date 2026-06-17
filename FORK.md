@@ -10,7 +10,7 @@ Per frame, `rpicam-hello` does:
 
 1. Runs the 1920x1080 viewfinder and feeds a 640x640 lores stream to YOLOv8 on a HAILO accelerator via the `hailo_yolo_inference` post-processing stage.
 2. HT-J2K-encodes the YUV420 viewfinder buffer with Kakadu (`HTJ2KEncoder`, multi-threaded, RPCL, `Cmodes=HT`, 4:2:0).
-3. **Always-on:** packetizes the codestream per RFC 9828 (HTJ2K-over-RTP) and fans it out over UDP to `--rtp-host` / `--rtp-port`.
+3. **Always-on:** packetizes the codestream per RFC 9828 (HTJ2K-over-RTP) and fans it out over UDP to `--rtp-host` / `--rtp-port`. Every RTP packet carries an absolute capture timestamp in a header extension (see *RTP capture-time extension* below).
 4. **Gated by detection:** when a `person` is detected with confidence > 0.75, the same codestream is also archived over a persistent length-prefixed TCP connection to a separate receiver.
 
 ## Current status
@@ -28,6 +28,34 @@ As of 2026-05-12:
   - Archive minimum interval default — `apps/rpicam_hello.cpp` / `encoder/ht_encoder.hpp`.
   - TCP destination — `encoder/simple_tcp.hpp`.
   - RTP host/port are CLI options (`--rtp-host`, `--rtp-port`).
+
+## RTP capture-time extension (glass-to-glass latency)
+
+Every RFC 9828 RTP datagram emitted by `rpicam-hello` carries the frame's
+**absolute capture wall-clock time** so a receiver can compute capture-to-display
+latency. The 90 kHz RTP timestamp (`ts90`) is unchanged — it still drives the
+receiver's pacing — and the capture time rides alongside it in an RFC 8285
+one-byte header extension:
+
+- RTP fixed header byte 0 is `0x90` (X=1: a header extension follows).
+- Immediately after the 12-byte fixed header (no CSRCs):
+  - profile `0xBE 0xDE`, length `0x00 0x03` (3 words = 12 bytes of ext data)
+  - element header `0x17` = `(ID<<4)|(len-1)` with **ID = 1**, len = 8
+  - 8 bytes: **capture time in nanoseconds since the UNIX epoch, big-endian**
+  - 3 bytes zero padding (pads 9 → 12)
+- The same extension is in **every** packet of a frame (Main and Body); per-datagram
+  growth is +16 B (max datagram 1316 B, still < 1472 MTU).
+
+Source of the timestamp: `apps/rpicam_hello.cpp` reads libcamera
+`SensorTimestamp` (CLOCK_BOOTTIME) and shifts it to CLOCK_REALTIME with a
+once-sampled offset (`kClkOffNs`); it falls back to CLOCK_REALTIME at loop time
+(with a warning) if the sensor reports no timestamp. The value threads through
+`HT_Encoder::EncodeBuffer` → `RFC9828Packetizer::send_codestream` →
+`write_rtp_header`. Implemented in `apps/rpicam_hello.cpp`,
+`encoder/ht_encoder.hpp`, `encoder/rfc9828_packetizer.hpp` (constant
+`CAPTURE_TS_ID = 1`). Receivers must skip the X=1 extension before reading the
+RFC 9828 payload header. Accuracy depends on the Pi's CLOCK_REALTIME being
+synced to the receiver host (PTP sub-ms, or NTP/chrony ~1 ms).
 
 ## Build
 
@@ -51,6 +79,10 @@ cd build/apps && ./rpicam-hello -c ../../run-config.txt
 ```
 
 There is no test suite; verification is done by running the binary against a live camera.
+
+### Compatibility
+
+- Builds clean against **libcamera 0.7.1** (`v0.7.1+rpt20260609`), verified 2026-06-17 — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.7`. No source changes were required.
 
 ## Prerequisites
 
