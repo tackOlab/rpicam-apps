@@ -134,8 +134,7 @@ private:
 				// Camera timestamp is microseconds; RTP timestamp is 90 kHz ticks.
 				// us * 9 / 100 = us * 90 / 1000 with less overflow risk on int64.
 				const uint32_t ts90 = static_cast<uint32_t>(encode_item.timestamp_us * 9 / 100);
-				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90,
-													 (uint64_t)encode_item.capture_ns))
+				if (!rtp_packetizer_.send_codestream(buf.data(), buffer_len, ts90, (uint64_t)encode_item.capture_ns))
 					LOG(1, "HT_Encoder: RTP send_codestream failed for frame " << encode_item.index);
 			}
 

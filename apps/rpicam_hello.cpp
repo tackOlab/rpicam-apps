@@ -35,7 +35,8 @@ enum progression
 // Fixed offset (ns) to convert the libcamera SensorTimestamp (CLOCK_BOOTTIME)
 // into CLOCK_REALTIME (UNIX epoch).  Sampled once at startup; both clocks tick
 // at the same rate, so a single offset is sufficient for g2g timestamping.
-static const int64_t kClkOffNs = [] {
+static const int64_t kClkOffNs = []
+{
 	struct timespec rt, bt;
 	clock_gettime(CLOCK_REALTIME, &rt);
 	clock_gettime(CLOCK_BOOTTIME, &bt);
