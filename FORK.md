@@ -54,8 +54,15 @@ once-sampled offset (`kClkOffNs`); it falls back to CLOCK_REALTIME at loop time
 `write_rtp_header`. Implemented in `apps/rpicam_hello.cpp`,
 `encoder/ht_encoder.hpp`, `encoder/rfc9828_packetizer.hpp` (constant
 `CAPTURE_TS_ID = 1`). Receivers must skip the X=1 extension before reading the
-RFC 9828 payload header. Accuracy depends on the Pi's CLOCK_REALTIME being
-synced to the receiver host (PTP sub-ms, or NTP/chrony ~1 ms).
+RFC 9828 payload header.
+
+**PTP lock is mandatory for latency measurement.** The capture-to-display
+figure is only the *difference* between the sender's CLOCK_REALTIME and the
+receiver's wall clock, so any offset between the two hosts shows up directly as
+latency error. The sender (Pi) and receiver **must** be PTP-locked to a common
+master (sub-ms) before the numbers mean anything. NTP/chrony (~1 ms or worse,
+and prone to step corrections) is **not** sufficient for glass-to-glass
+measurement — without PTP lock the reported latency is unusable.
 
 ## Build
 
