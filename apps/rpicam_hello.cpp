@@ -10,6 +10,7 @@
 
 #include <libcamera/control_ids.h>
 
+#include "core/buffer_sync.hpp"
 #include "core/options.hpp"
 #include "core/rpicam_app.hpp"
 #include "post_processing_stages/object_detect.hpp"
@@ -42,6 +43,21 @@ static const int64_t kClkOffNs = []
 	clock_gettime(CLOCK_BOOTTIME, &bt);
 	return (int64_t)rt.tv_sec * 1000000000LL + rt.tv_nsec - ((int64_t)bt.tv_sec * 1000000000LL + bt.tv_nsec);
 }();
+
+// Keeps a completed request, and the DMA read-sync over its buffer, alive until
+// the encoder has finished with the pixel data.  Releasing a CompletedRequestPtr
+// hands the buffer straight back to the sensor (RPiCamApp::queueRequest), so
+// scoping these to one loop iteration would let the camera overwrite a frame
+// mid-encode.  Declaration order matters: `sync` is destroyed before `request`,
+// so DMA_BUF_SYNC_END runs before the buffer is requeued.
+struct FrameHold
+{
+	FrameHold(CompletedRequestPtr r, std::unique_ptr<BufferReadSync> s) : request(std::move(r)), sync(std::move(s))
+	{
+	}
+	CompletedRequestPtr request;
+	std::unique_ptr<BufferReadSync> sync;
+};
 
 static void event_loop(RPiCamApp &app)
 {
@@ -124,13 +140,14 @@ static void event_loop(RPiCamApp &app)
 		}
 
 		libcamera::Stream *stream = app.ViewfinderStream();
-		BufferReadSync r(&app, completed_request->buffers[stream]);
-		libcamera::Span<uint8_t> buffer = r.Get()[0];
+		auto hold = std::make_shared<FrameHold>(
+			completed_request, std::make_unique<BufferReadSync>(&app, completed_request->buffers[stream]));
+		libcamera::Span<uint8_t> buffer = hold->sync->Get()[0];
 		const int w = options->Get().viewfinder_width;
 		const int h = options->Get().viewfinder_height;
 		cv::Mat frame(h * 3 / 2, w, CV_8UC1, buffer.data());
 		htenc.EncodeBuffer(1, w * h * 3 / 2, frame.data, app.GetStreamInfo(stream), now_us, archive_this_frame,
-						   capture_realtime_ns);
+						   capture_realtime_ns, std::move(hold));
 	}
 }
 
