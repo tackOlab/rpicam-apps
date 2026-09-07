@@ -253,6 +253,11 @@ Options::Options()
 			"RTP VideoFullRangeFlag (default true = full range; false = narrow/limited)")
 		("archive-min-interval-ms", value<int>(&v_->archive_min_interval_ms)->default_value(1000),
 			"Minimum spacing between TCP archive snapshots when a person is detected, in ms (default 1000)")
+		("rtp-mtu", value<int>(&v_->rtp_mtu)->default_value(1280),
+			"Path MTU in bytes for the RTP fan-out; datagrams are sized to avoid IP fragmentation "
+			"(default 1280, the Tailscale MTU; use 1500 for a plain LAN path)")
+		("rtp-pace", value<double>(&v_->rtp_pace)->default_value(0.8, "0.8"),
+			"Spread each frame's RTP packets over this fraction of a frame interval (0 disables pacing)")
 		("nopreview,n", value<bool>(&v_->nopreview)->default_value(false)->implicit_value(true),
 			"Do not show a preview window")
 		("preview,p", value<std::string>(&v_->preview)->default_value("0,0,0,0"),

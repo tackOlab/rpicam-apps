@@ -348,6 +348,13 @@ struct OptsInternal
 	// Minimum spacing between TCP archive snapshots when person-detected.
 	// Independent of the RTP fan-out, which runs every encoded frame.
 	int archive_min_interval_ms;
+	// Path MTU in bytes for the RTP fan-out.  Datagrams are sized so the resulting
+	// IPv4 packet never exceeds this, which keeps the kernel from fragmenting them.
+	// 1280 is the Tailscale/WireGuard interface MTU; use 1500 on a plain LAN.
+	int rtp_mtu;
+	// Fraction of one frame interval over which a frame's RTP packets are spread.
+	// 0 sends the whole frame as a single line-rate burst (the old behaviour).
+	double rtp_pace;
 };
 
 struct Options
