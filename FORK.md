@@ -64,12 +64,64 @@ master (sub-ms) before the numbers mean anything. NTP/chrony (~1 ms or worse,
 and prone to step corrections) is **not** sufficient for glass-to-glass
 measurement — without PTP lock the reported latency is unusable.
 
-## Build
+## Building
+
+The fork targets one platform: a **Raspberry Pi 5** running 64-bit **Raspberry Pi OS (Debian 13 "trixie")**, with a Raspberry Pi camera module and a **Hailo-8 / Hailo-8L** accelerator (AI Kit or AI HAT+). The steps below go from a fresh OS install to a running `rpicam-hello`.
+
+### 1. Install system packages
+
+Build tools and the rpicam-apps / OpenCV dependencies:
+
+```sh
+sudo apt update
+sudo apt install -y git build-essential pkg-config meson ninja-build cmake \
+    libcamera-dev libboost-program-options-dev libexif-dev libjpeg-dev \
+    libtiff-dev libpng-dev libdrm-dev libepoxy-dev libx11-dev libopencv-dev
+```
+
+The Hailo stack, followed by a reboot so the PCIe driver loads:
+
+```sh
+sudo apt install -y hailo-all
+sudo reboot
+```
+
+`hailo-all` installs HailoRT, hailo-tappas-core, the Hailo PCIe driver and `rpicam-apps-hailo-postprocess`. The latter also brings in the YOLOv8 models (`hailo-models`, in `/usr/share/hailo-models/`) and the pipeline JSONs in `/usr/share/rpi-camera-assets/` that `run-config.txt` uses.
+
+- The build needs HailoRT >= 4.18.0, hailo-tappas-core >= 3.31.0 and OpenCV 4. Tested with HailoRT 4.23.0, hailo-tappas-core 5.2.0, OpenCV 4.10.0 and libcamera 0.8.0.
+- The Hailo-10H stack (`hailo-h10-all`, which conflicts with `hailo-all`) has not been tested.
+- Optional: `wayland-protocols` (with `libwayland-dev`) enables upstream's native Wayland preview window. Without it meson skips that backend; the DRM/EGL previews are unaffected.
+
+### 2. Clone the repository
+
+```sh
+git clone https://github.com/tackOlab/rpicam-apps.git
+cd rpicam-apps
+```
+
+### 3. Add the Kakadu SDK
+
+Kakadu is commercial software and is **not** included in this repository: you need your own licensed copy. The Kakadu license is separate from the fork's BSD-2-Clause license and from upstream `rpicam-apps`. The fork is developed against Kakadu **v8.4.1**.
+
+Unpack the Kakadu distribution, as shipped, into `subprojects/kakadujs/extern/`, in a directory whose name starts with `v`:
+
+```
+subprojects/kakadujs/extern/v8_4_1-XXXXXX/   <- your Kakadu distribution (contains Enabling_HT.txt)
+subprojects/kakadujs/extern/kakadu/          <- tracked kakadujs CMake glue; leave as is
+```
+
+- **The `v` prefix keeps the licensed source out of git.** `subprojects/kakadujs/.gitignore` ignores `extern/v*`; a directory with any other name shows up as untracked in `git status` and could be committed to this public repository.
+- The kakadujs CMake locates the SDK by looking for `Enabling_HT.txt` in the directories under `extern/`, so keep exactly one Kakadu version there.
+- Do not replace `srclib_ht` with `altlib_ht_opt` or set `FC_BLOCK_ENABLED` as Kakadu's `Enabling_HT.txt` describes. The kakadujs CMake already builds with the processor's SIMD optimisations (see `subprojects/kakadujs/README.md`).
+
+There is no separate Kakadu build step: meson drives kakadujs as a CMake subproject (`cmake.subproject('kakadujs')` in `meson.build`) and compiles Kakadu along with everything else.
+
+### 4. Configure and build
 
 The fork builds only with the exact feature flags below — `enable_hailo` and `enable_opencv` are load-bearing because `rpicam-hello` is wired to use both:
 
 ```sh
-meson setup --wipe build --buildtype release \
+meson setup build --buildtype release \
     -Denable_libav=disabled -Denable_drm=enabled -Denable_egl=enabled \
     -Denable_qt=disabled -Denable_opencv=enabled -Denable_tflite=disabled \
     -Denable_hailo=enabled
@@ -77,32 +129,31 @@ meson compile -C build
 ./afterbuild.sh
 ```
 
-`afterbuild.sh` symlinks the post-processing `.so` modules, preview/encoder modules, and asset JSONs into `build/apps/`. It must be re-run after every clean configure — without it `rpicam-hello` cannot find `hailo-postproc.so` / `core-postproc.so` or their assets.
+The first `meson compile` takes about 3 minutes on a Pi 5. Check that `build/post_processing_stages/hailo/hailo-postproc.so` exists. If HailoRT, hailo-tappas-core or OpenCV was missing at configure time, meson **silently** skips it and `rpicam-hello` later fails to find `hailo_yolo_inference`. Install the missing packages and configure again (see *Rebuilding*).
 
-Run from the build dir:
+`afterbuild.sh` symlinks the post-processing `.so` modules, preview/encoder modules, and the asset JSONs from `/usr/share/rpi-camera-assets/` into `build/apps/`. It must be re-run after every clean configure — without it `rpicam-hello` cannot find `hailo-postproc.so` / `core-postproc.so` or their assets.
+
+### 5. Run
+
+Set `rtp-host` / `rtp-port` in `run-config.txt` to your receiver. (The TCP archive destination is hardcoded in `encoder/simple_tcp.hpp`; see *Current status*.) Then run from the build dir:
 
 ```sh
 cd build/apps && ./rpicam-hello -c ../../run-config.txt
 ```
 
+`run-config.txt` loads `./hailo_yolov8_inference.json`, which `afterbuild.sh` linked into `build/apps/`; it names the HEF models under `/usr/share/hailo-models/`. `lores-width` / `lores-height` in `run-config.txt` must match the model's input size (640x640 for these YOLOv8 models), or `hailo_yolo_inference` aborts.
+
 There is no test suite; verification is done by running the binary against a live camera.
+
+### Rebuilding
+
+- After pulling changes: `meson compile -C build && ./afterbuild.sh`. meson reconfigures itself when build files change.
+- To configure from scratch, run the `meson setup` command above with `--wipe` added, then `meson compile -C build` and `./afterbuild.sh`. **`--wipe` deletes everything in `build/`**, including files you placed in `build/apps/` yourself (for example a custom pipeline JSON), so move those elsewhere first.
 
 ### Compatibility
 
 - Builds clean against **libcamera 0.8.0** (`v0.8.0+rpt20261104`), verified 2026-11-13 on the post-`v1.15.0` sync — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.8`. This needed source changes: upstream's libcamera 0.8 fixes (`2d650a9`, `8b7d823`, `d37ffe5`), which arrived in the fork as cherry-picks in PR #22 ahead of the full sync, plus `libcamera::Span` → `std::span` in the fork's `apps/rpicam_hello.cpp`.
 - libcamera 0.7.x is no longer expected to build: the code now uses the libcamera 0.8 control and property names.
-
-## Prerequisites
-
-System packages must be present at meson configure time:
-
-- HailoRT >= 4.18.0
-- hailo-tappas-core >= 3.31.0
-- opencv4
-
-If any of these is missing, meson silently skips `hailo-postproc.so` and the runtime pipeline will fail to find `hailo_yolo_inference`.
-
-The Kakadu SDK is integrated as a meson `cmake.subproject('kakadujs')`. The licensed Kakadu source tree under `subprojects/kakadujs/extern/` is user-supplied and **not** redistributed with the fork. The Kakadu license is separate from the fork's BSD-2-Clause license and from upstream `rpicam-apps`.
 
 ## Pointers
 
