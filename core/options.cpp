@@ -29,11 +29,11 @@ namespace
 const std::map<int, std::string> &cfa_map()
 {
 	static const std::map<int, std::string> map {
-		{ properties::draft::ColorFilterArrangementEnum::RGGB, "RGGB" },
-		{ properties::draft::ColorFilterArrangementEnum::GRBG, "GRBG" },
-		{ properties::draft::ColorFilterArrangementEnum::GBRG, "GBRG" },
-		{ properties::draft::ColorFilterArrangementEnum::RGB, "RGB" },
-		{ properties::draft::ColorFilterArrangementEnum::MONO, "MONO" },
+		{ properties::draft::ColorFilterArrangementRGGB, "RGGB" },
+		{ properties::draft::ColorFilterArrangementGRBG, "GRBG" },
+		{ properties::draft::ColorFilterArrangementGBRG, "GBRG" },
+		{ properties::draft::ColorFilterArrangementRGB, "RGB" },
+		{ properties::draft::ColorFilterArrangementMONO, "MONO" },
 	};
 
 	return map;
@@ -253,6 +253,11 @@ Options::Options()
 			"RTP VideoFullRangeFlag (default true = full range; false = narrow/limited)")
 		("archive-min-interval-ms", value<int>(&v_->archive_min_interval_ms)->default_value(1000),
 			"Minimum spacing between TCP archive snapshots when a person is detected, in ms (default 1000)")
+		("rtp-mtu", value<int>(&v_->rtp_mtu)->default_value(1280),
+			"Path MTU in bytes for the RTP fan-out; datagrams are sized to avoid IP fragmentation "
+			"(default 1280, the Tailscale MTU; use 1500 for a plain LAN path)")
+		("rtp-pace", value<double>(&v_->rtp_pace)->default_value(0.8, "0.8"),
+			"Spread each frame's RTP packets over this fraction of a frame interval (0 disables pacing)")
 		("nopreview,n", value<bool>(&v_->nopreview)->default_value(false)->implicit_value(true),
 			"Do not show a preview window")
 		("preview,p", value<std::string>(&v_->preview)->default_value("0,0,0,0"),
@@ -598,11 +603,10 @@ bool OptsInternal::Parse(boost::program_options::variables_map &vm, RPiCamApp *a
 		transform = Transform::HFlip * transform;
 	if (vflip_)
 		transform = Transform::VFlip * transform;
-	bool ok;
-	Transform rot = transformFromRotation(rotation_, &ok);
-	if (!ok)
+	std::optional<Transform> rot = transformFromRotation(rotation_);
+	if (!rot)
 		throw std::runtime_error("illegal rotation value");
-	transform = rot * transform;
+	transform = *rot * transform;
 	if (!!(transform & Transform::Transpose))
 		throw std::runtime_error("transforms requiring transpose not supported");
 
@@ -614,11 +618,11 @@ bool OptsInternal::Parse(boost::program_options::variables_map &vm, RPiCamApp *a
 
 	// clang-format off
 	std::map<std::string, int> metering_table =
-		{ { "centre", libcamera::controls::MeteringCentreWeighted },
-			{ "spot", libcamera::controls::MeteringSpot },
-			{ "average", libcamera::controls::MeteringMatrix },
-			{ "matrix", libcamera::controls::MeteringMatrix },
-			{ "custom", libcamera::controls::MeteringCustom } };
+		{ { "centre", libcamera::controls::AeMeteringModeCentreWeighted },
+			{ "spot", libcamera::controls::AeMeteringModeSpot },
+			{ "average", libcamera::controls::AeMeteringModeMatrix },
+			{ "matrix", libcamera::controls::AeMeteringModeMatrix },
+			{ "custom", libcamera::controls::AeMeteringModeCustom } };
 	// clang-format on
 	if (metering_table.count(metering) == 0)
 		throw std::runtime_error("Invalid metering mode: " + metering);
@@ -626,11 +630,11 @@ bool OptsInternal::Parse(boost::program_options::variables_map &vm, RPiCamApp *a
 
 	// clang-format off
 	std::map<std::string, int> exposure_table =
-		{ { "normal", libcamera::controls::ExposureNormal },
-			{ "sport", libcamera::controls::ExposureShort },
-			{ "short", libcamera::controls::ExposureShort },
-			{ "long", libcamera::controls::ExposureLong },
-			{ "custom", libcamera::controls::ExposureCustom } };
+		{ { "normal", libcamera::controls::AeExposureModeNormal },
+			{ "sport", libcamera::controls::AeExposureModeShort },
+			{ "short", libcamera::controls::AeExposureModeShort },
+			{ "long", libcamera::controls::AeExposureModeLong },
+			{ "custom", libcamera::controls::AeExposureModeCustom } };
 	// clang-format on
 	if (exposure_table.count(exposure) == 0)
 		throw std::runtime_error("Invalid exposure mode:" + exposure);
@@ -668,15 +672,15 @@ bool OptsInternal::Parse(boost::program_options::variables_map &vm, RPiCamApp *a
 
 	// clang-format off
 	std::map<std::string, int> awb_table =
-		{ { "auto", libcamera::controls::AwbAuto },
-			{ "normal", libcamera::controls::AwbAuto },
-			{ "incandescent", libcamera::controls::AwbIncandescent },
-			{ "tungsten", libcamera::controls::AwbTungsten },
-			{ "fluorescent", libcamera::controls::AwbFluorescent },
-			{ "indoor", libcamera::controls::AwbIndoor },
-			{ "daylight", libcamera::controls::AwbDaylight },
-			{ "cloudy", libcamera::controls::AwbCloudy },
-			{ "custom", libcamera::controls::AwbCustom } };
+		{ { "auto", libcamera::controls::AwbModeAuto },
+			{ "normal", libcamera::controls::AwbModeAuto },
+			{ "incandescent", libcamera::controls::AwbModeIncandescent },
+			{ "tungsten", libcamera::controls::AwbModeTungsten },
+			{ "fluorescent", libcamera::controls::AwbModeFluorescent },
+			{ "indoor", libcamera::controls::AwbModeIndoor },
+			{ "daylight", libcamera::controls::AwbModeDaylight },
+			{ "cloudy", libcamera::controls::AwbModeCloudy },
+			{ "custom", libcamera::controls::AwbModeCustom } };
 	// clang-format on
 	if (awb_table.count(awb) == 0)
 		throw std::runtime_error("Invalid AWB mode: " + awb);

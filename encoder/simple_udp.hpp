@@ -55,4 +55,23 @@ public:
 		ssize_t n = sendto(sockfd, data, len, 0, reinterpret_cast<sockaddr *>(&dst_addr), sizeof(dst_addr));
 		return n == static_cast<ssize_t>(len);
 	}
+
+	// The destination, for callers that fill in their own msghdrs.
+	sockaddr *dst()
+	{
+		return reinterpret_cast<sockaddr *>(&dst_addr);
+	}
+	socklen_t dst_len() const
+	{
+		return sizeof(dst_addr);
+	}
+
+	// Send a batch of prepared datagrams with one syscall. Returns the number the
+	// kernel accepted (which may be fewer than asked for), or -1 on error.
+	int send_group(mmsghdr *msgs, unsigned int count)
+	{
+		if (sockfd < 0)
+			return -1;
+		return sendmmsg(sockfd, msgs, count, 0);
+	}
 };

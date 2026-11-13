@@ -10,12 +10,22 @@
 // packets), marker bit on the last packet of the frame. PTSTAMP/ESEQ/POS/PID
 // are zero in this minimal packetizer (we don't emit sub-codestream timing or
 // resync points).
+//
+// A frame is built into a reusable arena and then sent in small batches with
+// sendmmsg(), spaced across a pacing window rather than dumped at line rate.
+// An unpaced 1080p frame is ~250-400 kB arriving in 2-3 ms, which is about the
+// size of the default 208 kB UDP receive buffer -- a receiver that is busy
+// decoding for even that long loses the rest of the frame in the kernel.
 
 #include <arpa/inet.h>
+#include <sys/socket.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "simple_udp.hpp"
@@ -47,13 +57,16 @@ public:
 	static constexpr uint8_t CAPTURE_TS_ID = 1;
 	static constexpr size_t RTP_EXT_BYTES = 16; // 4-byte ext header + 8-byte ns + 3 pad + 1 element hdr -> 16 total
 
-	// Conservative payload budget. Standard Ethernet MTU is 1500; subtracting
-	// 20 (IPv4) + 8 (UDP) leaves 1472. Use 1300 to stay safe under VPN/tunnel
-	// encapsulation and avoid IP fragmentation.
-	static constexpr size_t TARGET_DATAGRAM_BYTES = 1300;
 	static constexpr size_t RTP_HEADER_BYTES = 12;
 	static constexpr size_t MAIN_HEADER_BYTES = 8;
 	static constexpr size_t BODY_HEADER_BYTES = 8;
+
+	// IPv4 + UDP headers that sit in front of every datagram on the wire.
+	static constexpr size_t IP_UDP_OVERHEAD = 28;
+
+	// Datagrams per sendmmsg() batch. 8 x ~1.2 kB is ~10 kB per burst, small
+	// enough for any default-sized receive buffer to absorb between wakeups.
+	static constexpr unsigned int BATCH_PKTS = 8;
 
 	// H.273 colorspace fields written into the Main packet when colorspace_set
 	// is true (S=1 in the spec).  When colorspace_set is false (S=0), receivers
@@ -67,14 +80,33 @@ public:
 		bool full_range = true;
 	};
 
-	RFC9828Packetizer(const std::string &dst_host, int dst_port, Colorspace cs, uint8_t ordh = ORDH_RPCL_RESYNC)
+	RFC9828Packetizer(const std::string &dst_host, int dst_port, Colorspace cs, int path_mtu = 1280,
+					  uint8_t ordh = ORDH_RPCL_RESYNC)
 		: sock_(dst_host, dst_port), seq_(0), ordh_(ordh), cs_(cs)
 	{
+		// Budget every byte the datagram actually carries.  Main and Body payload
+		// headers are both 8 bytes, so a single chunk size covers both cases.
+		const size_t fixed = RTP_HEADER_BYTES + RTP_EXT_BYTES + MAIN_HEADER_BYTES;
+		const int64_t budget = static_cast<int64_t>(path_mtu) - static_cast<int64_t>(IP_UDP_OVERHEAD + fixed);
+		chunk_max_ = static_cast<size_t>(std::max<int64_t>(budget, 64));
+		datagram_max_ = fixed + chunk_max_;
 	}
 
 	bool is_open() const
 	{
 		return sock_.is_open();
+	}
+
+	// Bytes of codestream carried per datagram, after all headers.
+	size_t chunk_size() const
+	{
+		return chunk_max_;
+	}
+
+	// Window (ns) across which one frame's packets are spread. 0 = no pacing.
+	void set_pacing_window(int64_t ns)
+	{
+		pace_window_ns_ = ns;
 	}
 
 	// Packetize and send one HTJ2K codestream as 1+N RTP datagrams.
@@ -86,129 +118,155 @@ public:
 			return false;
 
 		capture_ns_ = capture_ns; // written into the header extension of every packet of this frame
+		build_frame(cs, cs_len, timestamp90);
+		return send_paced();
+	}
 
-		constexpr size_t MAIN_MAX = TARGET_DATAGRAM_BYTES - RTP_HEADER_BYTES - MAIN_HEADER_BYTES;
-		constexpr size_t BODY_MAX = TARGET_DATAGRAM_BYTES - RTP_HEADER_BYTES - BODY_HEADER_BYTES;
+private:
+	// Lay the whole frame out in the arena, one datagram per fixed-size slot, and
+	// point the iovec/mmsghdr arrays at it. Everything here is reused frame to
+	// frame, so the steady state does no allocation.
+	void build_frame(const uint8_t *cs, size_t cs_len, uint32_t ts)
+	{
+		const size_t n = (cs_len + chunk_max_ - 1) / chunk_max_;
+		if (arena_.size() < n * datagram_max_)
+			arena_.resize(n * datagram_max_);
+		iov_.resize(n);
+		msgs_.resize(n);
 
-		const bool single_main = (cs_len <= MAIN_MAX);
-		const uint8_t mh = single_main ? MH_MAIN_SINGLE : MH_MAIN_THEN_BODY;
-		const size_t main_chunk = single_main ? cs_len : MAIN_MAX;
-
-		if (!send_main_packet(cs, main_chunk, mh, timestamp90, /*marker=*/single_main))
-			return false;
-
-		size_t sent = main_chunk;
-		while (sent < cs_len)
+		size_t off = 0;
+		for (size_t i = 0; i < n; ++i)
 		{
-			const size_t remaining = cs_len - sent;
-			const size_t body_chunk = (remaining > BODY_MAX) ? BODY_MAX : remaining;
-			const bool last = (sent + body_chunk == cs_len);
-			if (!send_body_packet(cs + sent, body_chunk, timestamp90, /*marker=*/last))
+			const size_t chunk = std::min(chunk_max_, cs_len - off);
+			const bool last = (off + chunk == cs_len);
+			uint8_t *p = arena_.data() + i * datagram_max_;
+
+			size_t len = write_rtp_header(p, last, ts);
+			if (i == 0)
+				len += write_main_header(p + len, (n == 1) ? MH_MAIN_SINGLE : MH_MAIN_THEN_BODY);
+			else
+				len += write_body_header(p + len);
+			memcpy(p + len, cs + off, chunk);
+			len += chunk;
+			off += chunk;
+
+			iov_[i].iov_base = p;
+			iov_[i].iov_len = len;
+			memset(&msgs_[i], 0, sizeof(msgs_[i]));
+			msgs_[i].msg_hdr.msg_name = sock_.dst();
+			msgs_[i].msg_hdr.msg_namelen = sock_.dst_len();
+			msgs_[i].msg_hdr.msg_iov = &iov_[i];
+			msgs_[i].msg_hdr.msg_iovlen = 1;
+		}
+	}
+
+	// Send the built frame in batches, holding each batch to a deadline derived
+	// from the pacing window. Deadlines are absolute so the spacing doesn't drift.
+	bool send_paced()
+	{
+		const size_t n = msgs_.size();
+		if (n == 0)
+			return true;
+
+		const auto t0 = std::chrono::steady_clock::now();
+		size_t sent = 0;
+		while (sent < n)
+		{
+			const unsigned int batch = static_cast<unsigned int>(std::min<size_t>(BATCH_PKTS, n - sent));
+			const int rc = sock_.send_group(&msgs_[sent], batch);
+			if (rc <= 0)
 				return false;
-			sent += body_chunk;
+			sent += static_cast<size_t>(rc);
+			if (pace_window_ns_ > 0 && sent < n)
+			{
+				const int64_t due = static_cast<int64_t>(pace_window_ns_ * sent / n);
+				std::this_thread::sleep_until(t0 + std::chrono::nanoseconds(due));
+			}
 		}
 		return true;
 	}
 
-private:
-	bool send_main_packet(const uint8_t *cs_chunk, size_t chunk_len, uint8_t mh, uint32_t ts, bool marker)
+	size_t write_rtp_header(uint8_t *p, bool marker, uint32_t ts)
 	{
-		std::vector<uint8_t> dg;
-		dg.reserve(RTP_HEADER_BYTES + RTP_EXT_BYTES + MAIN_HEADER_BYTES + chunk_len);
-		write_rtp_header(dg, marker, ts);
+		size_t i = 0;
+		// Byte 0: V=2 P=0 X=1 CC=0  (X=1: a header extension follows)
+		p[i++] = 0x90;
+		// Byte 1: M | PT
+		p[i++] = static_cast<uint8_t>((marker ? 0x80 : 0x00) | (RTP_PT & 0x7F));
+		// Bytes 2-3: sequence (BE)
+		p[i++] = static_cast<uint8_t>((seq_ >> 8) & 0xFF);
+		p[i++] = static_cast<uint8_t>(seq_ & 0xFF);
+		// Bytes 4-7: timestamp (BE)
+		p[i++] = static_cast<uint8_t>((ts >> 24) & 0xFF);
+		p[i++] = static_cast<uint8_t>((ts >> 16) & 0xFF);
+		p[i++] = static_cast<uint8_t>((ts >> 8) & 0xFF);
+		p[i++] = static_cast<uint8_t>(ts & 0xFF);
+		// Bytes 8-11: SSRC (BE)
+		p[i++] = static_cast<uint8_t>((RTP_SSRC >> 24) & 0xFF);
+		p[i++] = static_cast<uint8_t>((RTP_SSRC >> 16) & 0xFF);
+		p[i++] = static_cast<uint8_t>((RTP_SSRC >> 8) & 0xFF);
+		p[i++] = static_cast<uint8_t>(RTP_SSRC & 0xFF);
+		++seq_;
 
+		// RFC 8285 one-byte header extension: absolute capture time (ns, BE).
+		// profile 0xBEDE, length 3 words (12 bytes of extension data).
+		p[i++] = 0xBE;
+		p[i++] = 0xDE;
+		p[i++] = 0x00;
+		p[i++] = 0x03;
+		// element header: (ID<<4) | (len-1); ID=1, len=8 -> 0x17
+		p[i++] = static_cast<uint8_t>((CAPTURE_TS_ID << 4) | 0x07);
+		// 8 bytes: capture_ns big-endian
+		for (int s = 56; s >= 0; s -= 8)
+			p[i++] = static_cast<uint8_t>((capture_ns_ >> s) & 0xFF);
+		// 3 bytes zero padding (9 -> 12 bytes of extension data)
+		p[i++] = 0x00;
+		p[i++] = 0x00;
+		p[i++] = 0x00;
+		return i;
+	}
+
+	size_t write_main_header(uint8_t *p, uint8_t mh)
+	{
+		size_t i = 0;
 		// Byte 0: MH(2) | TP(3)=0 | ORDH(3)
-		dg.push_back(static_cast<uint8_t>(((mh & 0x03) << 6) | (ordh_ & 0x07)));
+		p[i++] = static_cast<uint8_t>(((mh & 0x03) << 6) | (ordh_ & 0x07));
 		// Byte 1: P(1)=0 | XTRAC(3)=0 | PTSTAMP[11:8](4)=0
-		dg.push_back(0x00);
+		p[i++] = 0x00;
 		// Byte 2: PTSTAMP[7:0]=0
-		dg.push_back(0x00);
+		p[i++] = 0x00;
 		// Byte 3: ESEQ=0
-		dg.push_back(0x00);
+		p[i++] = 0x00;
 		// Byte 4: R(1)=0 | S(1) | C(1)=0 | RSVD(4)=0 | RANGE(1)
 		// Bytes 5-7: PRIMS, TRANS, MAT (per H.273; meaningful only when S=1).
 		// When S=0 the spec requires bytes 4..7 to be all zero, so we hand-build
 		// either layout here.
 		if (cs_.colorspace_set)
 		{
-			uint8_t b4 = static_cast<uint8_t>(0x40 /* S=1 */ | (cs_.full_range ? 0x01 : 0x00));
-			dg.push_back(b4);
-			dg.push_back(cs_.prims);
-			dg.push_back(cs_.trans);
-			dg.push_back(cs_.mat);
+			p[i++] = static_cast<uint8_t>(0x40 /* S=1 */ | (cs_.full_range ? 0x01 : 0x00));
+			p[i++] = cs_.prims;
+			p[i++] = cs_.trans;
+			p[i++] = cs_.mat;
 		}
 		else
 		{
-			dg.push_back(0x00);
-			dg.push_back(0x00);
-			dg.push_back(0x00);
-			dg.push_back(0x00);
+			p[i++] = 0x00;
+			p[i++] = 0x00;
+			p[i++] = 0x00;
+			p[i++] = 0x00;
 		}
-
-		dg.insert(dg.end(), cs_chunk, cs_chunk + chunk_len);
-		return sock_.sendto_one(dg.data(), dg.size());
+		return i;
 	}
 
-	bool send_body_packet(const uint8_t *cs_chunk, size_t chunk_len, uint32_t ts, bool marker)
+	size_t write_body_header(uint8_t *p)
 	{
-		std::vector<uint8_t> dg;
-		dg.reserve(RTP_HEADER_BYTES + RTP_EXT_BYTES + BODY_HEADER_BYTES + chunk_len);
-		write_rtp_header(dg, marker, ts);
-
 		// Byte 0: MH(2)=0 | TP(3)=0 | RES(3)=0
-		dg.push_back(0x00);
 		// Byte 1: ORDB(1)=0 | QUAL(3)=0 | PTSTAMP[11:8](4)=0
-		dg.push_back(0x00);
 		// Byte 2: PTSTAMP[7:0]=0
-		dg.push_back(0x00);
 		// Byte 3: ESEQ=0
-		dg.push_back(0x00);
 		// Bytes 4-7: POS=0 PID=0 (ORDB=0 requires both)
-		dg.push_back(0x00);
-		dg.push_back(0x00);
-		dg.push_back(0x00);
-		dg.push_back(0x00);
-
-		dg.insert(dg.end(), cs_chunk, cs_chunk + chunk_len);
-		return sock_.sendto_one(dg.data(), dg.size());
-	}
-
-	void write_rtp_header(std::vector<uint8_t> &dg, bool marker, uint32_t ts)
-	{
-		// Byte 0: V=2 P=0 X=1 CC=0  (X=1: a header extension follows)
-		dg.push_back(0x90);
-		// Byte 1: M | PT
-		dg.push_back(static_cast<uint8_t>((marker ? 0x80 : 0x00) | (RTP_PT & 0x7F)));
-		// Bytes 2-3: sequence (BE)
-		dg.push_back(static_cast<uint8_t>((seq_ >> 8) & 0xFF));
-		dg.push_back(static_cast<uint8_t>(seq_ & 0xFF));
-		// Bytes 4-7: timestamp (BE)
-		dg.push_back(static_cast<uint8_t>((ts >> 24) & 0xFF));
-		dg.push_back(static_cast<uint8_t>((ts >> 16) & 0xFF));
-		dg.push_back(static_cast<uint8_t>((ts >> 8) & 0xFF));
-		dg.push_back(static_cast<uint8_t>(ts & 0xFF));
-		// Bytes 8-11: SSRC (BE)
-		dg.push_back(static_cast<uint8_t>((RTP_SSRC >> 24) & 0xFF));
-		dg.push_back(static_cast<uint8_t>((RTP_SSRC >> 16) & 0xFF));
-		dg.push_back(static_cast<uint8_t>((RTP_SSRC >> 8) & 0xFF));
-		dg.push_back(static_cast<uint8_t>(RTP_SSRC & 0xFF));
-		++seq_;
-
-		// RFC 8285 one-byte header extension: absolute capture time (ns, BE).
-		// profile 0xBEDE, length 3 words (12 bytes of extension data).
-		dg.push_back(0xBE);
-		dg.push_back(0xDE);
-		dg.push_back(0x00);
-		dg.push_back(0x03);
-		// element header: (ID<<4) | (len-1); ID=1, len=8 -> 0x17
-		dg.push_back(static_cast<uint8_t>((CAPTURE_TS_ID << 4) | 0x07));
-		// 8 bytes: capture_ns big-endian
-		for (int s = 56; s >= 0; s -= 8)
-			dg.push_back(static_cast<uint8_t>((capture_ns_ >> s) & 0xFF));
-		// 3 bytes zero padding (9 -> 12 bytes of extension data)
-		dg.push_back(0x00);
-		dg.push_back(0x00);
-		dg.push_back(0x00);
+		memset(p, 0, BODY_HEADER_BYTES);
+		return BODY_HEADER_BYTES;
 	}
 
 	simple_udp_client sock_;
@@ -216,4 +274,12 @@ private:
 	uint8_t ordh_;
 	Colorspace cs_;
 	uint64_t capture_ns_ = 0;
+
+	size_t chunk_max_ = 0;
+	size_t datagram_max_ = 0;
+	int64_t pace_window_ns_ = 0;
+
+	std::vector<uint8_t> arena_;
+	std::vector<iovec> iov_;
+	std::vector<mmsghdr> msgs_;
 };

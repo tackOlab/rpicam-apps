@@ -89,7 +89,8 @@ There is no test suite; verification is done by running the binary against a liv
 
 ### Compatibility
 
-- Builds clean against **libcamera 0.7.1** (`v0.7.1+rpt20260609`), verified 2026-06-17 — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.7`. No source changes were required.
+- Builds clean against **libcamera 0.8.0** (`v0.8.0+rpt20261104`), verified 2026-11-13 — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.8`. This needed source changes: upstream's libcamera 0.8 fixes (`2d650a9`, `8b7d823`, `d37ffe5`, from v1.13.0–v1.15.0) are cherry-picked on top of the post-`v1.12.0` sync, plus `libcamera::Span` → `std::span` in `apps/rpicam_hello.cpp`. The rest of upstream v1.13.0–v1.15.0 is not synced.
+- libcamera 0.7.x is no longer expected to build: the code now uses the libcamera 0.8 control and property names.
 
 ## Prerequisites
 
