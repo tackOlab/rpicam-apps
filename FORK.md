@@ -17,7 +17,7 @@ Per frame, `rpicam-hello` does:
 
 As of 2026-05-12:
 
-- **Upstream sync:** post-`v1.12.0`. The v1.11.1 sync landed in PR #7; the trailing imx296 test-bypass commit (`4c79698`) is pending in PR #17.
+- **Upstream sync:** post-`v1.15.0` (`7b69b7c`), synced 2026-11-13. Earlier syncs: v1.11.1 in PR #7, post-`v1.12.0` in PRs #17 and #19.
 - **Working:**
   - HAILO YOLOv8 inference loaded at runtime as `hailo-postproc.so`.
   - Per-frame HT-J2K encode + RFC 9828 RTP fan-out (`encoder/ht_encoder.hpp`, `encoder/rfc9828_packetizer.hpp`, `encoder/simple_udp.hpp`).
@@ -89,7 +89,7 @@ There is no test suite; verification is done by running the binary against a liv
 
 ### Compatibility
 
-- Builds clean against **libcamera 0.8.0** (`v0.8.0+rpt20261104`), verified 2026-11-13 — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.8`. This needed source changes: upstream's libcamera 0.8 fixes (`2d650a9`, `8b7d823`, `d37ffe5`, from v1.13.0–v1.15.0) are cherry-picked on top of the post-`v1.12.0` sync, plus `libcamera::Span` → `std::span` in `apps/rpicam_hello.cpp`. The rest of upstream v1.13.0–v1.15.0 is not synced.
+- Builds clean against **libcamera 0.8.0** (`v0.8.0+rpt20261104`), verified 2026-11-13 on the post-`v1.15.0` sync — full reconfigure + compile of all targets, `rpicam-hello` links `libcamera.so.0.8`. This needed source changes: upstream's libcamera 0.8 fixes (`2d650a9`, `8b7d823`, `d37ffe5`), which arrived in the fork as cherry-picks in PR #22 ahead of the full sync, plus `libcamera::Span` → `std::span` in the fork's `apps/rpicam_hello.cpp`.
 - libcamera 0.7.x is no longer expected to build: the code now uses the libcamera 0.8 control and property names.
 
 ## Prerequisites

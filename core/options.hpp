@@ -40,6 +40,9 @@ struct Mode
 	unsigned int bit_depth;
 	bool packed;
 	double framerate;
+	// Set when the mode was given as an index into the camera's mode list; it is
+	// resolved into width/height/bit_depth once the cameras have been enumerated.
+	std::optional<unsigned int> mode_index;
 	libcamera::Size Size() const
 	{
 		return libcamera::Size(width, height);
@@ -226,6 +229,7 @@ struct OptsInternal
 	std::string awbgains;
 	float awb_gain_r;
 	float awb_gain_b;
+	unsigned int colour_temp;
 	std::string ccm;
 	float ccm_values[9];
 	bool flush;
@@ -334,6 +338,7 @@ struct OptsInternal
 	std::string timelapse_;
 
 	std::string preview_libs;
+	std::string preview_backend;
 	std::string encoder_libs;
 
 	// RFC 9828 RTP destination for the live-monitoring fan-out in HT_Encoder.
