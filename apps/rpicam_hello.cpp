@@ -142,7 +142,7 @@ static void event_loop(RPiCamApp &app)
 		libcamera::Stream *stream = app.ViewfinderStream();
 		auto hold = std::make_shared<FrameHold>(
 			completed_request, std::make_unique<BufferReadSync>(&app, completed_request->buffers[stream]));
-		libcamera::Span<uint8_t> buffer = hold->sync->Get()[0];
+		std::span<uint8_t> buffer = hold->sync->Get()[0];
 		const int w = options->Get().viewfinder_width;
 		const int h = options->Get().viewfinder_height;
 		cv::Mat frame(h * 3 / 2, w, CV_8UC1, buffer.data());
