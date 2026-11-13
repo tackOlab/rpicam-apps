@@ -157,7 +157,6 @@ There is no test suite; verification is done by running the binary against a liv
 
 ## Pointers
 
-- Architecture and integration details (where Kakadu/HAILO touch upstream code, what must not be modified): [`CLAUDE.md`](CLAUDE.md).
 - Runtime options consumed by `rpicam-hello -c ...`: [`run-config.txt`](run-config.txt).
 - Post-processing pipeline JSON used in practice: [`assets/hailo_yolov8_inference.json`](assets/hailo_yolov8_inference.json).
 - Fork-vs-upstream diff: `git diff upstream/main..HEAD`.
