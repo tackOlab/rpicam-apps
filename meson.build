@@ -1,6 +1,6 @@
 project('rpicam-apps', 'c', 'cpp',
         meson_version : '>= 0.64.0',
-        version : '1.12.0',
+        version : '1.15.0',
         default_options : [
             'werror=true',
             'warning_level=3',
@@ -98,10 +98,12 @@ summary({
             'libav encoder' : enable_libav,
             'drm preview' : enable_drm,
             'egl preview' : enable_egl,
+            'wayland preview' : enable_wayland,
             'qt preview' : enable_qt,
             'OpenCV postprocessing' : enable_opencv,
             'TFLite postprocessing' : enable_tflite,
             'Hailo postprocessing' : enable_hailo,
             'IMX500 postprocessing' : get_option('enable_imx500'),
+            'prod test app' : get_option('enable_prod'),
         },
         bool_yn : true, section : 'Build configuration')

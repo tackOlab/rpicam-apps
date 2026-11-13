@@ -13,6 +13,11 @@ option('enable_egl',
         value : 'auto',
         description : 'Enable EGL preview window support')
 
+option('enable_wayland',
+        type : 'feature',
+        value : 'auto',
+        description : 'Enable native Wayland EGL preview window support')
+
 option('enable_qt',
         type : 'feature',
         value : 'auto',
@@ -43,6 +48,11 @@ option('enable_imx500',
         type : 'boolean',
         value : false,
         description : 'Enable IMX500 postprocessing support')
+
+option('enable_prod',
+        type : 'boolean',
+        value : false,
+        description : 'Build rpicam-prod, the camera production line test application')
 
 option('disable_rpi_features',
         type : 'boolean',
